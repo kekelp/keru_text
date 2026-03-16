@@ -827,7 +827,9 @@ impl TextBox {
             return;
         }
         self.transform.translation = new_translation;
-        self.shared_mut().rebuild_glyph_quad_buffer = true; // todo yikes        
+        let i = self.render_data_info.box_index;
+        self.shared_mut().render_data.box_data.get_mut(i).translation = [pos.0 as f32, pos.1 as f32];
+        self.shared_mut().render_data.needs_box_data_sync = true;       
     }
 
     /// Sets the transform of the text box.
@@ -841,7 +843,12 @@ impl TextBox {
         self.transform.translation = transform.translation;
         self.transform.rotation = transform.rotation;
         self.transform.scale = transform.scale;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
+        let i = self.render_data_info.box_index;
+        let box_data = self.shared_mut().render_data.box_data.get_mut(i);
+        box_data.translation = [transform.translation.0, transform.translation.1];
+        box_data.rotation = transform.rotation;
+        box_data.scale = transform.scale;
+        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Sets the transform of the text box without updating the retained transform.
@@ -855,7 +862,12 @@ impl TextBox {
         self.transform.translation = transform.translation;
         self.transform.rotation = transform.rotation;
         self.transform.scale = transform.scale;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
+        let i = self.render_data_info.box_index;
+        let box_data = self.shared_mut().render_data.box_data.get_mut(i);
+        box_data.translation = [transform.translation.0, transform.translation.1];
+        box_data.rotation = transform.rotation;
+        box_data.scale = transform.scale;
+        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Returns the current transform of the text box.
@@ -873,7 +885,9 @@ impl TextBox {
             return;
         }
         self.transform.translation = (x, y);
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
+        let i = self.render_data_info.box_index;
+        self.shared_mut().render_data.box_data.get_mut(i).translation = [x, y];
+        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Sets the rotation of the text box in radians.
@@ -882,7 +896,9 @@ impl TextBox {
             return;
         }
         self.transform.rotation = radians;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
+        let i = self.render_data_info.box_index;
+        self.shared_mut().render_data.box_data.get_mut(i).rotation = radians;
+        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Hides or unhides the text box.
@@ -903,7 +919,9 @@ impl TextBox {
             return;
         }
         self.depth = depth;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
+        let i = self.render_data_info.box_index;
+        self.shared_mut().render_data.box_data.get_mut(i).depth = depth;
+        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Sets a screen-space clip rect.
@@ -914,7 +932,19 @@ impl TextBox {
             return;
         }
         self.screen_space_clip_rect = clip_rect;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
+        let i = self.render_data_info.box_index;
+        let box_data = self.shared_mut().render_data.box_data.get_mut(i);
+        match clip_rect {
+            Some(clip) => {
+                box_data.screen_clip_x = [clip.x0 as f32, clip.x1 as f32];
+                box_data.screen_clip_y = [clip.y0 as f32, clip.y1 as f32];
+            }
+            None => {
+                box_data.screen_clip_x = [f32::NEG_INFINITY, f32::INFINITY];
+                box_data.screen_clip_y = [f32::NEG_INFINITY, f32::INFINITY];
+            }
+        }
+        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Sets whether automatic clipping to the text box bounds is enabled.
@@ -947,7 +977,17 @@ impl TextBox {
             return;
         }
         self.scroll_offset = offset;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
+        let i = self.render_data_info.box_index;
+        let auto_clip = self.auto_clip;
+        let max_advance = self.max_advance;
+        let height = self.height;
+        let box_data = self.shared_mut().render_data.box_data.get_mut(i);
+        box_data.scroll_offset = [offset.0, offset.1];
+        if auto_clip {
+            box_data.clip_rect_x = [offset.0, offset.0 + max_advance];
+            box_data.clip_rect_y = [offset.1, offset.1 + height];
+        }
+        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Sets the style for the text box.

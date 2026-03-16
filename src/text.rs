@@ -63,8 +63,6 @@ pub struct Text {
 
     pub(crate) current_visibility_frame: u64,
 
-    pub(crate) render_data: RenderData,
-
     pub(crate) renderer: TextRenderer,
 
     #[cfg(feature = "accessibility")]
@@ -76,6 +74,8 @@ pub struct Text {
 
 /// Data that TextBoxMut and similar things need to have a reference to.
 pub(crate) struct Shared {
+    pub(crate) render_data: RenderData,
+
     pub styles: SlotMap<DefaultKey, StyleInner>,
     pub default_style_key: DefaultKey,
     pub rebuild_glyph_quad_buffer: bool,
@@ -378,7 +378,6 @@ impl Text {
             scroll_animations: Vec::new(),
             current_visibility_frame: 1,
             using_frame_based_visibility: false,
-            render_data,
             renderer,
 
             #[cfg(feature = "accessibility")]
@@ -387,6 +386,7 @@ impl Text {
             selected_text_buffer: String::with_capacity(25),
 
             shared: Box::new(Shared {
+                render_data,
                 windows: Vec::with_capacity(1),
                 styles,
                 default_style_key,
@@ -435,23 +435,23 @@ impl Text {
     /// Useful only for custom rendering.
     pub fn load_to_gpu(&mut self) {
         // Update uniform buffer if needed
-        if self.render_data.needs_params_sync {
-            let bytes: &[u8] = bytemuck::cast_slice(std::slice::from_ref(&self.render_data.params));
+        if self.shared.render_data.needs_params_sync {
+            let bytes: &[u8] = bytemuck::cast_slice(std::slice::from_ref(&self.shared.render_data.params));
             self.renderer.queue.write_buffer(&self.renderer.params_buffer, 0, bytes);
-            self.render_data.needs_params_sync = false;
+            self.shared.render_data.needs_params_sync = false;
         }
 
         // Rebuild texture arrays if needed
-        if self.render_data.needs_texture_array_rebuild {
-            self.renderer.rebuild_texture_arrays(&mut self.render_data);
-            self.render_data.needs_texture_array_rebuild = false;
+        if self.shared.render_data.needs_texture_array_rebuild {
+            self.renderer.rebuild_texture_arrays(&mut self.shared.render_data);
+            self.shared.render_data.needs_texture_array_rebuild = false;
         } else {
-            self.renderer.update_texture_arrays(&mut self.render_data);
+            self.renderer.update_texture_arrays(&mut self.shared.render_data);
         }
 
         // Sync quads buffer if needed
-        if self.render_data.needs_glyph_sync {
-            let required_size = (self.render_data.glyph_quads.len() * std::mem::size_of::<GlyphQuad>()) as u64;
+        if self.shared.render_data.needs_glyph_sync {
+            let required_size = (self.shared.render_data.glyph_quads.len() * std::mem::size_of::<GlyphQuad>()) as u64;
 
             // Grow shared vertex buffer if needed
             if self.renderer.vertex_buffer.size() < required_size {
@@ -465,27 +465,27 @@ impl Text {
             }
 
             // Write all quads to vertex buffer
-            if !self.render_data.glyph_quads.is_empty() {
-                let bytes: &[u8] = bytemuck::cast_slice(&self.render_data.glyph_quads);
+            if !self.shared.render_data.glyph_quads.is_empty() {
+                let bytes: &[u8] = bytemuck::cast_slice(&self.shared.render_data.glyph_quads);
                 self.renderer.queue.write_buffer(&self.renderer.vertex_buffer, 0, bytes);
                 #[cfg(debug_assertions)] {
-                    self.render_data.stats.gpu_bytes += bytes.len() as u64;
+                    self.shared.render_data.stats.gpu_bytes += bytes.len() as u64;
                 }
             }
 
-            self.render_data.needs_glyph_sync = false;
+            self.shared.render_data.needs_glyph_sync = false;
             self.shared.rerender_cursor = false;
         } else if self.shared.rerender_cursor {
             // Cursor-blink-only sync: just update the cursor quad's color
-            if let Some(cursor_index) = self.render_data.cursor_quad_index {
+            if let Some(cursor_index) = self.shared.render_data.cursor_quad_index {
                 let color = if self.shared.cursor_blink_animation_currently_visible {
                     CURSOR_COLOR
                 } else {
                     0x00_00_00_00
                 };
-                self.render_data.glyph_quads[cursor_index].color = color;
+                self.shared.render_data.glyph_quads[cursor_index].color = color;
 
-                let bytes: &[u8] = bytemuck::cast_slice(&self.render_data.glyph_quads[cursor_index..cursor_index + 1]);
+                let bytes: &[u8] = bytemuck::cast_slice(&self.shared.render_data.glyph_quads[cursor_index..cursor_index + 1]);
                 let offset = (cursor_index * std::mem::size_of::<GlyphQuad>()) as u64;
                 self.renderer.queue.write_buffer(&self.renderer.vertex_buffer, offset, bytes);
             }
@@ -494,8 +494,8 @@ impl Text {
         }
 
         // Sync box_data buffer if needed
-        if self.render_data.needs_box_data_sync {
-            let box_data_required_size = (self.render_data.box_data.len() * std::mem::size_of::<BoxGpu>()) as u64;
+        if self.shared.render_data.needs_box_data_sync {
+            let box_data_required_size = (self.shared.render_data.box_data.len() * std::mem::size_of::<BoxGpu>()) as u64;
 
             // Grow box_data buffer if needed
             if self.renderer.box_data_buffer.size() < box_data_required_size {
@@ -509,22 +509,22 @@ impl Text {
             }
 
             // Write all box_data to buffer
-            if self.render_data.box_data.len() != 0 {
-                let bytes: &[u8] = bytemuck::cast_slice(&self.render_data.box_data.as_slice());
+            if self.shared.render_data.box_data.len() != 0 {
+                let bytes: &[u8] = bytemuck::cast_slice(&self.shared.render_data.box_data.as_slice());
                 self.renderer.queue.write_buffer(&self.renderer.box_data_buffer, 0, bytes);
                 #[cfg(debug_assertions)] {
-                    self.render_data.stats.gpu_bytes += bytes.len() as u64;
+                    self.shared.render_data.stats.gpu_bytes += bytes.len() as u64;
                 }
             }
 
-            self.render_data.needs_box_data_sync = false;
+            self.shared.render_data.needs_box_data_sync = false;
         }
     }
 
     /// Render all prepared text using the provided render pass.
     pub fn render(&mut self, pass: &mut RenderPass) {
         self.load_to_gpu();
-        self.renderer.render(pass, &self.render_data);
+        self.renderer.render(pass, &self.shared.render_data);
     }
 
     /// Get render statistics from the last frame.
@@ -535,7 +535,7 @@ impl Text {
     /// Only available in debug builds.
     #[cfg(debug_assertions)]
     pub fn render_stats(&self) -> &RenderStats {
-        self.render_data.stats()
+        self.shared.render_data.stats()
     }
 
     pub(crate) fn new_style_version(&mut self) -> u64 {
@@ -555,7 +555,7 @@ impl Text {
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
         let mut text_box = TextBox::new(text, pos, size, depth, self.shared.default_style_key, shared_backref);
 
-        let box_data_i = self.render_data.box_data.insert(BoxGpu::zeroed());
+        let box_data_i = self.shared.render_data.box_data.insert(BoxGpu::zeroed());
         text_box.render_data_info.box_index = box_data_i;
 
         text_box.last_frame_touched = self.current_visibility_frame;
@@ -578,7 +578,7 @@ impl Text {
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
         let mut text_edit = TextEdit::new(text, pos, size, depth, self.shared.default_style_key, shared_backref);
 
-        let box_data_i = self.render_data.box_data.insert(BoxGpu::zeroed());
+        let box_data_i = self.shared.render_data.box_data.insert(BoxGpu::zeroed());
         text_edit.text_box.render_data_info.box_index = box_data_i;
 
         text_edit.text_box.last_frame_touched = self.current_visibility_frame;
@@ -779,7 +779,7 @@ impl Text {
         let text_box = self.text_boxes.remove(handle.key).unwrap();
         
         let box_data_i = text_box.render_data_info.box_index;
-        self.render_data.box_data.remove(box_data_i);
+        self.shared.render_data.box_data.remove(box_data_i);
 
         std::mem::forget(handle);
     }
@@ -807,7 +807,7 @@ impl Text {
         let text_edit = self.text_edits.remove(handle.key).unwrap();
 
         let box_data_i = text_edit.text_box.render_data_info.box_index;
-        self.render_data.box_data.remove(box_data_i);
+        self.shared.render_data.box_data.remove(box_data_i);
 
         std::mem::forget(handle);
     }
@@ -854,11 +854,11 @@ impl Text {
 
     pub(crate) fn prepare_all_impl(&mut self, window_id: WindowId, window_size: (f32, f32)) {
         #[cfg(debug_assertions)] {
-            self.render_data.stats = RenderStats::default();
+            self.shared.render_data.stats = RenderStats::default();
         }
 
         self.shared.pasted_this_frame = false;
-        self.render_data.update_resolution(window_size.0, window_size.1);
+        self.shared.render_data.update_resolution(window_size.0, window_size.1);
 
         // todo: not sure if this works correctly with multi-window.
         if !self.shared.rebuild_glyph_quad_buffer && self.using_frame_based_visibility {
@@ -877,12 +877,12 @@ impl Text {
 
         if self.shared.rebuild_glyph_quad_buffer {
             // Full clear and re-prepare everything
-            self.render_data.clear();
+            self.shared.render_data.clear();
         } else if !self.scrolled_moved_indices.is_empty() {
             // Scroll only - just update BoxGpu, no clearing needed.
             if !self.handle_scroll_fast_path() {
                 // Fast path failed (tolerance exceeded), fall back to full prepare
-                self.render_data.clear();
+                self.shared.render_data.clear();
                 self.shared.rebuild_glyph_quad_buffer = true;
             }
         }
@@ -894,7 +894,7 @@ impl Text {
                 if !text_edit.text_box.hidden() && text_edit.text_box.last_frame_touched == current_frame {
                     let should_render = text_edit.text_box.window_id.is_none() || text_edit.text_box.window_id == Some(window_id);
                     if should_render {
-                        self.render_data.prepare_text_edit_layout(text_edit);
+                        self.shared.render_data.prepare_text_edit_layout(text_edit);
                     }
                 }
             }
@@ -904,7 +904,7 @@ impl Text {
                     let should_render = text_box.window_id.is_none() || text_box.window_id == Some(window_id);
                     if should_render {
                         let show_selection = self.shared.multi_box_selection.contains(&key);
-                        self.render_data.prepare_text_box_layout(&mut text_box, false, show_selection);
+                        self.shared.render_data.prepare_text_box_layout(&mut text_box, false, show_selection);
                     }
                 }
             }
@@ -937,7 +937,7 @@ impl Text {
     /// Returns false if scroll has exceeded the tolerance from the base position (line culling),
     /// in which case the caller should fall back to a full re-prepare.
     fn handle_scroll_fast_path(&mut self) -> bool {
-        self.render_data.needs_box_data_sync = true;
+        self.shared.render_data.needs_box_data_sync = true;
         for any_box in &self.scrolled_moved_indices {
             match any_box {
                 AnyBox::TextEdit(i) => {
@@ -945,7 +945,7 @@ impl Text {
                         if text_edit.text_box.is_scroll_distance_above_tolerance() {
                             return false;
                         } else {
-                            update_scroll(&mut self.render_data, &mut text_edit.text_box.render_data_info, text_edit.text_box.scroll_offset);
+                            update_scroll(&mut self.shared.render_data, &mut text_edit.text_box.render_data_info, text_edit.text_box.scroll_offset);
                         }
                     }
                 },
@@ -954,7 +954,7 @@ impl Text {
                         if text_box.is_scroll_distance_above_tolerance() {
                             return false;
                         } else {
-                            update_scroll(&mut self.render_data, &mut text_box.render_data_info, text_box.scroll_offset);
+                            update_scroll(&mut self.shared.render_data, &mut text_box.render_data_info, text_box.scroll_offset);
                         }
                     }
                 },

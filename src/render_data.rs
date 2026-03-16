@@ -488,11 +488,6 @@ impl RenderData {
         }
     }
 
-    /// Get the glyph quads buffer for external rendering
-    pub fn glyph_quads(&self) -> &[GlyphQuad] {
-        &self.glyph_quads
-    }
-
     /// Adjust BoxGpu for scroll fast path: updates scroll_offset and clip_rect.
     pub fn adjust_box_for_scroll(&mut self, box_index: usize, delta_x: f32, delta_y: f32) {
         let box_data = self.box_data.get_mut(box_index);
