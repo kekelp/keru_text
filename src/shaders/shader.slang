@@ -18,7 +18,7 @@ struct VertexOutput {
     text_vertex(
         instanceIndex,
         vertexIndex,
-        text.params.resolution,
+        keru_text.params.resolution,
         output.position,
         output.uv
     );
