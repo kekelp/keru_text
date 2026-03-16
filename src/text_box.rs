@@ -55,8 +55,7 @@ pub struct TextBox {
     pub(crate) width: f32,
     pub(crate) height: f32,
     pub(crate) alignment: Alignment,
-    pub(crate) clip_rect: Option<parley::BoundingBox>,
-    pub(crate) screen_space_clip_rect: Option<(f32, f32, f32, f32)>, // (min_x, min_y, max_x, max_y) in screen space
+    pub(crate) screen_space_clip_rect: Option<parley::BoundingBox>,
     pub(crate) auto_clip: bool,
     pub(crate) scroll_offset: (f32, f32),
     
@@ -175,7 +174,6 @@ impl TextBox {
             style: StyleHandle { key: default_style_key },
             width: size.0,
             alignment: Default::default(),
-            clip_rect: None,
             screen_space_clip_rect: None,
             auto_clip: false,
             scroll_offset: (0.0, 0.0),
@@ -347,11 +345,6 @@ impl TextBox {
         self.transform.translation
     }
 
-    /// Returns the current clip rect of the text box.
-    pub fn clip_rect(&self) -> Option<parley::BoundingBox> {
-        self.clip_rect
-    }
-
     /// Returns the currently selected text, or `None` if no text is currently selected.
     pub fn selected_text(&self) -> Option<&str> {
         if !self.selection.is_collapsed() {
@@ -392,7 +385,7 @@ impl TextBox {
 
 impl TextBox {
     pub(crate) fn effective_clip_rect(&self) -> Option<parley::BoundingBox> {
-        let auto_clip_rect = if self.auto_clip {
+        if self.auto_clip {
             Some(parley::BoundingBox {
                 x0: self.scroll_offset.0 as f64,
                 y0: self.scroll_offset.1 as f64,
@@ -401,33 +394,6 @@ impl TextBox {
             })
         } else {
             None
-        };
-
-        let clip_rect = self.clip_rect.map(|explicit| {
-            parley::BoundingBox {
-                x0: explicit.x0 + self.scroll_offset.0 as f64,
-                y0: explicit.y0 + self.scroll_offset.1 as f64,
-                x1: explicit.x1 + self.scroll_offset.0 as f64,
-                y1: explicit.y1 + self.scroll_offset.1 as f64,
-            }
-        });
-
-        match (auto_clip_rect, clip_rect) {
-            (None, None) => None,
-            (Some(auto), None) => Some(auto),
-            (None, Some(explicit)) => Some(explicit),
-            (Some(auto), Some(explicit)) => {
-                let x0 = auto.x0.max(explicit.x0);
-                let y0 = auto.y0.max(explicit.y0);
-                let x1 = auto.x1.min(explicit.x1);
-                let y1 = auto.y1.min(explicit.y1);
-                
-                if x0 < x1 && y0 < y1 {
-                    Some(parley::BoundingBox { x0, y0, x1, y1 })
-                } else {
-                    Some(parley::BoundingBox { x0: 0.0, y0: 0.0, x1: 0.0, y1: 0.0 })
-                }
-            }
         }
     }
 
@@ -857,17 +823,11 @@ impl TextBox {
     /// Sets the position of the text box.
     pub fn set_pos(&mut self, pos: (f64, f64)) {
         let new_translation = (pos.0 as f32, pos.1 as f32);
-        self.transform.translation = new_translation;
-    }
-
-    /// Sets the position of the text box without updating the retained transform.
-    pub fn set_transformed_pos(&mut self, pos: (f64, f64)) {
-        let new_translation = (pos.0 as f32, pos.1 as f32);
         if self.transform.translation == new_translation {
             return;
         }
         self.transform.translation = new_translation;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
+        self.shared_mut().rebuild_glyph_quad_buffer = true; // todo yikes        
     }
 
     /// Sets the transform of the text box.
@@ -946,25 +906,24 @@ impl TextBox {
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
-    /// Sets the clipping rectangle for the text box.
-    ///
-    /// This clipping rectangle is in local space, not affected by the transform.
-    pub fn set_clip_rect(&mut self, clip_rect: Option<parley::BoundingBox>) {
-        if self.clip_rect == clip_rect {
-            return;
-        }
-        self.clip_rect = clip_rect;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
-    }
-
-    /// Sets a screen-space clip rect (min_x, min_y, max_x, max_y).
-    /// Unlike the regular clip_rect, this one is applied in screen space in the fragment shader,
+    /// Sets a screen-space clip rect.
+    /// This is applied in screen space in the fragment shader,
     /// so it works correctly even when the text box is rotated.
-    pub fn set_screen_space_clip_rect(&mut self, clip_rect: Option<(f32, f32, f32, f32)>) {
+    pub fn set_clip_rect(&mut self, clip_rect: Option<parley::BoundingBox>) {
         if self.screen_space_clip_rect == clip_rect {
             return;
         }
         self.screen_space_clip_rect = clip_rect;
+        self.shared_mut().rebuild_glyph_quad_buffer = true;
+    }
+
+    /// Sets whether automatic clipping to the text box bounds is enabled.
+    /// When enabled, text is clipped to the rectangle defined by scroll_offset and the box size.
+    pub fn set_auto_clip(&mut self, auto_clip: bool) {
+        if self.auto_clip == auto_clip {
+            return;
+        }
+        self.auto_clip = auto_clip;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 

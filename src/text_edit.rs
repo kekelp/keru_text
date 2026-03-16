@@ -1260,11 +1260,6 @@ impl TextEdit {
     pub fn depth(&self) -> f32 {
         self.text_box.depth()
     }
-    
-    /// Returns the clipping rectangle.
-    pub fn clip_rect(&self) -> Option<parley::BoundingBox> {
-        self.text_box.clip_rect()
-    }
 
     /// Returns `true` if automatic clipping is enabled.
     pub fn auto_clip(&self) -> bool {
@@ -1306,11 +1301,6 @@ impl TextEdit {
         self.text_box.set_pos(pos);
     }
 
-    /// Sets the position of the text edit box without updating the retained transform.
-    pub fn set_transformed_pos(&mut self, pos: (f64, f64)) {
-        self.text_box.set_transformed_pos(pos);
-    }
-
     /// Sets whether the text edit box is hidden.
     pub fn set_hidden(&mut self, hidden: bool) {
         self.text_box.set_hidden(hidden);
@@ -1320,15 +1310,10 @@ impl TextEdit {
     pub fn set_depth(&mut self, value: f32) {
         self.text_box.set_depth(value);
     }
-    
-    /// Sets the clipping rectangle for the text edit box.
-    pub fn set_clip_rect(&mut self, clip_rect: Option<parley::BoundingBox>) {
-        self.text_box.set_clip_rect(clip_rect);
-    }
 
     /// Sets the screen-space clipping rectangle for the text edit box.
-    pub fn set_screen_space_clip_rect(&mut self, clip_rect: Option<(f32, f32, f32, f32)>) {
-        self.text_box.set_screen_space_clip_rect(clip_rect);
+    pub fn set_clip_rect(&mut self, clip_rect: Option<parley::BoundingBox>) {
+        self.text_box.set_clip_rect(clip_rect);
     }
 
     /// Sets an explicit hitbox for hit detection in local space (min_x, min_y, max_x, max_y).

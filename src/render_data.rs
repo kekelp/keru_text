@@ -19,13 +19,7 @@ pub struct RenderStats {
     pub gpu_bytes: u64,
 }
 
-/// CPU-side rendering data for text preparation.
-///
-/// This struct holds all the data needed to prepare text for rendering,
-/// including glyph caching, atlas management, and render buffers.
-///
-/// The actual GPU resources are managed by [`TextRenderer`].
-pub struct RenderData {
+pub(crate) struct RenderData {
     pub(crate) frame: u64,
     pub(crate) tmp_image: Image,
 
@@ -59,7 +53,6 @@ pub struct RenderData {
     pub(crate) stats: RenderStats,
 }
 
-// Content type constants
 const CONTENT_TYPE_MASK: u32 = 0;
 const CONTENT_TYPE_COLOR: u32 = 1;
 const CONTENT_TYPE_DECORATION: u32 = 2;
@@ -190,7 +183,7 @@ fn pack_flags_and_page(flags: u32, page_index: u32) -> u32 {
     (flags & 0xFFFFFF) | ((page_index & 0xFF) << 24)
 }
 
-fn create_box_data(clip_rect: Option<parley::BoundingBox>, scroll_offset: (f32, f32), transform: Transform2D, screen_clip: Option<(f32, f32, f32, f32)>, depth: f32) -> BoxGpu {
+fn create_box_data(clip_rect: Option<BoundingBox>, scroll_offset: (f32, f32), transform: Transform2D, screen_clip: Option<BoundingBox>, depth: f32) -> BoxGpu {
     // clip_rect from effective_clip_rect() is already in layout-local coordinates (includes scroll_offset)
     let (clip_rect_x, clip_rect_y) = if let Some(clip) = clip_rect {
         (
@@ -205,7 +198,7 @@ fn create_box_data(clip_rect: Option<parley::BoundingBox>, scroll_offset: (f32, 
     };
 
     let (screen_clip_x, screen_clip_y) = match screen_clip {
-        Some((min_x, min_y, max_x, max_y)) => ([min_x, max_x], [min_y, max_y]),
+        Some(clip) => ([clip.x0 as f32, clip.x1 as f32], [clip.y0 as f32, clip.y1 as f32]),
         None => ([f32::NEG_INFINITY, f32::INFINITY], [f32::NEG_INFINITY, f32::INFINITY]),
     };
 
@@ -455,7 +448,7 @@ impl RenderData {
         self.last_frame_evicted != current_frame
     }
 
-    fn make_selection_rect(&mut self, rect: parley::BoundingBox, color: u32, box_index: u32) -> Option<GlyphQuad> {
+    fn make_selection_rect(&mut self, rect: BoundingBox, color: u32, box_index: u32) -> Option<GlyphQuad> {
         let x0 = rect.x0 as i32;
         let x1 = rect.x1 as i32;
         let y0 = rect.y0 as i32;

@@ -102,13 +102,9 @@ impl State {
         
         text.get_text_box_mut(&clipped_text_box).set_style(&big_text_style_handle);
         text.get_text_box_mut(&clipped_text_box).set_selectable(true);
-
-        text.get_text_box_mut(&clipped_text_box).set_selectable(true);
-        text.get_text_box_mut(&clipped_text_box).set_clip_rect(Some(parley::BoundingBox {
-            x0: 0.0,
-            y0: 0.0,
-            x1: 200.0,
-            y1: 30.0,
+        text.get_text_box_mut(&clipped_text_box).set_auto_clip(true);
+        text.get_text_box_mut(&clipped_text_box).set_clip_rect(Some(BoundingBox {
+            x0: 20.0, y0: 200.0, x1: 50.0, y1: 430.0,
         }));
 
         text.get_text_style_mut(&big_text_style_handle).font_size = 32.0;
@@ -116,7 +112,6 @@ impl State {
         text.get_text_box_mut(&justified_static_text).set_style(&custom_font_style_handle);
         text.get_text_box_mut(&justified_static_text).set_alignment(Alignment::Justify);
 
-        // Set a rotation on the clipped text box to test transform event handling
         text.get_text_box_mut(&clipped_text_box).set_transform(
             Transform2D {
                 translation: (20.0, 400.0),
