@@ -1314,6 +1314,7 @@ impl TextBox {
                 // Style changed externally, invalidate cached quads
                 self.render_data_info.cache_generation = 0;
             }
+            self.shared_mut().rebuild_glyph_quad_buffer = true;
             self.rebuild_layout(None, false);
         }
     }

@@ -561,7 +561,6 @@ impl Text {
         text_box.last_frame_touched = self.current_visibility_frame;
         text_box.style_version = self.shared.styles[text_box.style.key].version;
         let key = self.text_boxes.insert(text_box);
-        self.shared.rebuild_glyph_quad_buffer = true;
         let handle = TextBoxHandle { key };
         // Fill in the local copy of the key.
         self.get_text_box_mut(&handle).key = key;
@@ -584,7 +583,6 @@ impl Text {
         text_edit.text_box.last_frame_touched = self.current_visibility_frame;
         text_edit.text_box.style_version = self.shared.styles[text_edit.text_box.style.key].version;
         let key = self.text_edits.insert(text_edit);
-        self.shared.rebuild_glyph_quad_buffer = true;
         let handle = TextEditHandle { key };
         // Fill in the local copy of the key.
         self.get_text_edit_mut(&handle).text_box.key = key;
@@ -603,7 +601,6 @@ impl Text {
         text_box.style_version = self.shared.styles[text_box.style.key].version;
         text_box.window_id = Some(window_id);
         let key = self.text_boxes.insert(text_box);
-        self.shared.rebuild_glyph_quad_buffer = true;
         let handle = TextBoxHandle { key };
         // Fill in the local copy of the key.
         self.get_text_box_mut(&handle).key = key;
@@ -623,7 +620,6 @@ impl Text {
         text_edit.text_box.style_version = self.shared.styles[text_edit.text_box.style.key].version;
         text_edit.text_box.window_id = Some(window_id);
         let key = self.text_edits.insert(text_edit);
-        self.shared.rebuild_glyph_quad_buffer = true;
         let handle = TextEditHandle { key };
         // Fill in the local copy of the key.
         self.get_text_edit_mut(&handle).text_box.key = key;
