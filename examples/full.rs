@@ -95,7 +95,7 @@ impl State {
         
         // Use the handles to access and edit text boxes. Accessing a box through a handle is a very fast operation, basically just an array access. There is no hashing involved.
         text.get_text_edit_mut(&single_line_input).set_single_line(true);
-        text.get_text_edit_mut(&single_line_input).set_placeholder("Single line input".to_string());
+        text.get_text_edit_mut(&single_line_input).set_placeholder_static("Single line input");
         text.get_text_edit_mut(&editable_text_with_unicode).set_style(&big_text_style_handle);
         text.get_text_edit_mut(&shift_enter_text_edit).set_newline_mode(NewlineMode::ShiftEnter);
         text.get_text_edit_mut(&_help_text_edit).set_style(&monospace_style_handle);

@@ -65,7 +65,7 @@ impl State {
         let text_edit_handle = text.add_text_edit("".to_string(), (50.0, 100.0), (300.0, 35.0), 0.0);
         text.set_text_edit_accesskit_id(&text_edit_handle, TEXT_EDIT_ID);
         text.get_text_edit_mut(&text_edit_handle).set_single_line(true);
-        text.get_text_edit_mut(&text_edit_handle).set_placeholder("Type here".to_string());
+        text.get_text_edit_mut(&text_edit_handle).set_placeholder_static("Type here");
         
         let info_text_handle = text.add_text_box(
             "This is an accessibility demo. To navigate, try using the platform screen reader's keyboard shortcuts (e.g. Caps Lock + arrow keys on Windows by default).".to_string(),
@@ -76,7 +76,7 @@ impl State {
         let multiline_text_handle = text.add_text_edit("".to_string(), (50.0, 450.0), (500.0, 200.0), 0.0);
         text.set_text_edit_accesskit_id(&multiline_text_handle, MULTILINE_TEXT_ID);
         text.get_text_edit_mut(&multiline_text_handle).set_single_line(false);
-        text.get_text_edit_mut(&multiline_text_handle).set_placeholder("Multiline text edit");
+        text.get_text_edit_mut(&multiline_text_handle).set_placeholder_static("Multiline text edit");
 
         let text_renderer = TextRenderer::new(&device, &queue, surface_config.format);
         

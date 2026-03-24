@@ -29,7 +29,7 @@ impl State {
         let mut text = Text::new(&device, &queue, surface_config.format);
         let text_edit_handle = text.add_text_edit("SNEED".to_string(), (50.0, 50.0), (400.0, 200.0), 0.0);
 
-        text.get_text_edit_mut(&text_edit_handle).set_placeholder("Type here...");
+        text.get_text_edit_mut(&text_edit_handle).set_placeholder_static("Type here...");
 
         Self { device, queue, surface, surface_config, window, text, }
     }

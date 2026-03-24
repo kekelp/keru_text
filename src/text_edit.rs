@@ -116,10 +116,11 @@ pub struct TextEdit {
     pub(crate) single_line: bool,
     pub(crate) newline_mode: NewlineMode,
     pub(crate) disabled: bool,
-    pub(crate) showing_placeholder: bool,
-    pub(crate) placeholder_text: Option<Cow<'static, str>>,
     pub(crate) text_box: TextBox,
     pub(crate) needs_scroll_update: bool,
+    pub(crate) showing_placeholder: bool,
+    pub(crate) placeholder_text: Option<Cow<'static, str>>,
+    pub(crate) placeholder_text_identity: Option<TextIdentity>,
 }
 
 #[derive(Debug, Clone)]
@@ -150,10 +151,11 @@ impl TextEdit {
             single_line: false,
             newline_mode: NewlineMode::default(),
             disabled: false,
-            showing_placeholder: false,
-            placeholder_text: None,
             text_box,
             needs_scroll_update: false,
+            showing_placeholder: false,
+            placeholder_text: None,
+            placeholder_text_identity: None,
         }
     }
 }
@@ -1464,21 +1466,97 @@ impl TextEdit {
         self.text_box.move_to_text_end();
         // Clear any composition state
         self.compose = None;
-        // Not showing placeholder anymore since we have real text
-        self.showing_placeholder = false;
+        self.restore_placeholder_if_any();
     }
 
     /// Set placeholder text that will be shown when the text edit is empty.
-    pub fn set_placeholder(&mut self, placeholder: impl Into<Cow<'static, str>>) {
-        let placeholder_cow = placeholder.into();
-        self.placeholder_text = Some(placeholder_cow.clone());
+    pub fn set_placeholder(&mut self, placeholder: &str) {
+        self.placeholder_text_identity = None;
+        // Store placeholder, reusing existing buffer if possible
+        match &mut self.placeholder_text {
+            Some(Cow::Owned(s)) => {
+                s.clear();
+                s.push_str(placeholder);
+            }
+            _ => {
+                self.placeholder_text = Some(Cow::Owned(placeholder.to_string()));
+            }
+        }
+        self.reapply_placeholder_if_needed();
+    }
+
+    /// Set placeholder text, using a hash to detect if unchanged.
+    ///
+    /// If called again with the same text, it will detect unchanged and skip work.
+    /// Useful for declarative APIs.
+    pub fn set_placeholder_hashed(&mut self, placeholder: &str) {
+        let new_identity = TextIdentity::Hash(hash_text(placeholder));
+        if self.placeholder_text_identity == Some(new_identity) {
+            return;
+        }
+        self.placeholder_text_identity = Some(new_identity);
+        match &mut self.placeholder_text {
+            Some(Cow::Owned(s)) => {
+                s.clear();
+                s.push_str(placeholder);
+            }
+            _ => {
+                self.placeholder_text = Some(Cow::Owned(placeholder.to_string()));
+            }
+        }
+        self.reapply_placeholder_if_needed();
+    }
+
+    /// Set placeholder text, using pointer identity to detect if unchanged.
+    ///
+    /// Only use when the string reference is stable (e.g. from an immutable source).
+    /// If called again with the same pointer, it will skip work.
+    pub fn set_placeholder_with_pointer_check(&mut self, placeholder: &str) {
+        let new_identity = TextIdentity::Pointer(placeholder as *const str);
+        if self.placeholder_text_identity == Some(new_identity) {
+            return;
+        }
+        self.placeholder_text_identity = Some(new_identity);
+        match &mut self.placeholder_text {
+            Some(Cow::Owned(s)) => {
+                s.clear();
+                s.push_str(placeholder);
+            }
+            _ => {
+                self.placeholder_text = Some(Cow::Owned(placeholder.to_string()));
+            }
+        }
+        self.reapply_placeholder_if_needed();
+    }
+
+    /// Set placeholder text to a static string reference.
+    pub fn set_placeholder_static(&mut self, placeholder: &'static str) {
+        self.placeholder_text_identity = None;
+        self.placeholder_text = Some(Cow::Borrowed(placeholder));
+        self.reapply_placeholder_if_needed();
+    }
+
+    /// Set placeholder text to a static string, using pointer identity to detect if unchanged.
+    ///
+    /// If called again with the same static string, it will skip work.
+    /// Useful for declarative APIs.
+    pub fn set_placeholder_static_with_pointer_check(&mut self, placeholder: &'static str) {
+        let new_identity = TextIdentity::Pointer(placeholder as *const str);
+        if self.placeholder_text_identity == Some(new_identity) {
+            return;
+        }
+        self.placeholder_text_identity = Some(new_identity);
+        self.placeholder_text = Some(Cow::Borrowed(placeholder));
+        self.reapply_placeholder_if_needed();
+    }
+
+    fn reapply_placeholder_if_needed(&mut self) {
         if self.text_box.text_inner().is_empty() || self.showing_placeholder {
-            self.text_box.text_mut_string().clear();
-            self.text_box.text_mut_string().push_str(&placeholder_cow);
-            self.text_box.needs_relayout = true;
-            self.showing_placeholder = true;
-            self.text_box.reset_selection();
-            self.text_box.shared_mut().rebuild_glyph_quad_buffer = true;
+            if let Some(placeholder) = &self.placeholder_text {
+                self.text_box.set_text(placeholder);
+                self.showing_placeholder = true;
+                self.text_box.reset_selection();
+            }
         }
     }
 
