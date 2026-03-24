@@ -174,7 +174,7 @@ impl Default for TextEditStyle {
     fn default() -> Self {
         Self {
             disabled_text_color: ColorBrush([128, 128, 128, 255]),
-            placeholder_text_color: ColorBrush([95, 95, 95, 255]),
+            placeholder_text_color: ColorBrush([20, 255, 20, 255]),
         }
     }
 }

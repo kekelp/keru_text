@@ -544,7 +544,7 @@ impl TextEdit {
     }
 
     pub(crate) fn restore_placeholder_if_any(&mut self) {
-        if self.text_box.text_inner().is_empty() && !self.showing_placeholder {
+        if self.text_box.text_inner().is_empty() && ! self.showing_placeholder {
             if self.placeholder_text.is_some() {
                 self.text_box.text_mut_string().clear();
                 self.refresh_layout();
