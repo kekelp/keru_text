@@ -1161,11 +1161,13 @@ impl_for_textedit_and_texteditmut! {
             Node::new(Role::MultilineTextInput)
         };
 
-        let text_content = self.text_box.text.to_string();
-        node.set_value(text_content.clone());
-        
-        if self.showing_placeholder() && !text_content.is_empty() {
-            node.set_description(text_content);
+        if self.showing_placeholder() {
+            node.set_value(String::new());
+            if let Some(placeholder) = &self.placeholder_text {
+                node.set_description(placeholder.to_string());
+            }
+        } else {
+            node.set_value(self.text_box.text.to_string());
         }
         
         let (left, top) = self.text_box.pos();
@@ -1236,14 +1238,22 @@ impl TextEdit {
         })
     }
 
-    /// Returns the raw text content.
+    /// Returns the text content. Returns an empty string if placeholder is showing.
     pub fn raw_text(&self) -> &str {
-        self.text_box.text()
+        if self.showing_placeholder {
+            ""
+        } else {
+            self.text_box.text()
+        }
     }
     
-    /// Returns the currently selected text, if any.
+    /// Returns the currently selected text, if any. Returns `None` if placeholder is showing.
     pub fn selected_text(&self) -> Option<&str> {
-        self.text_box.selected_text()
+        if self.showing_placeholder {
+            None
+        } else {
+            self.text_box.selected_text()
+        }
     }
     
     /// Returns the position of the text edit box.
@@ -1291,8 +1301,12 @@ impl TextEdit {
         self.style_version() != self.text_box.style_version
     }
 
-    /// Returns a mutable reference to the raw text content.
+    /// Returns a mutable reference to the text content.
     pub fn raw_text_mut(&mut self) -> &mut String {
+        // clear the placeholder so that the user can edit the text. If the text is empty after the modifications, the placeholder text should get restored anyway at the next relayout.
+        if self.showing_placeholder {
+            self.clear_placeholder();
+        }
         self.text_box.text_mut_string()
     }
 
