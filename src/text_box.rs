@@ -312,6 +312,11 @@ impl TextBox {
     // - If we're in a method on TextBox, use self.shared_mut().
     // - If we're in a random free function and the arguments are a random mixture of references to things that we don't remember the path to, delete the whole function, rewrite it as either a method on Text or a method on TextBox, and get the Shared from there.
     // Technically these functions should be marked as unsafe, but since they are private, we don't do it.
+    // 
+    // Note that the unsafe pointer isn't REALLY needed. We could make the library work the same way without it. (i.e. have the interface where the user calls get_text_box() and gets a single text box, which can also access the Shared state for styles and other shared stuff).
+    // We'd just have to make a wrapper struct that holds a ref to the TextBox and a ref to Shared, and make get_text_box() return that.
+    // However, such a wrapper struct has worse erdonomigcs: we would need to have separate structs for TextBox and TextBoxMut, the user would need to make the TextBoxMut binding itself mutable, etc.   
+    // The point of the unsafe pointer is purely to avoid these ergonomic downsides, not to enable an intrinsecally un-Rust-y pattern.
     pub(crate) fn shared_mut(&mut self) -> &mut Shared {
         unsafe { self.shared_backref.as_mut() }
     }
