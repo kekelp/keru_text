@@ -1,6 +1,6 @@
 /// Intrusive slab for use on GPU.
 /// 
-/// This is a simplified slab that doesn't even track occupied/unoccupied slots.
+/// This is a simplified slab that doesn't even track occupied/unoccupied slots, which is fine if we only need to refer to elements by index and we never have to iterate.
 pub(crate) struct GpuSlab<T: GpuSlabItem> {
     items: Vec<T>,
     first_free: Option<usize>,

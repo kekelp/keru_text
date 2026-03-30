@@ -643,7 +643,7 @@ impl Text {
     /// `handle` is the handle that was returned when first creating the text edit with [`Text::add_text_edit()`] or similar functions.
     ///    
     /// This is a fast lookup operation that does not require any hashing.
-    pub fn get_text_edit(&mut self, handle: &TextEditHandle) -> &TextEdit {
+    pub fn get_text_edit(&self, handle: &TextEditHandle) -> &TextEdit {
         return &self.text_edits[handle.key];
     }
 
@@ -855,6 +855,11 @@ impl Text {
 
         self.shared.pasted_this_frame = false;
         self.shared.render_data.update_resolution(window_size.0, window_size.1);
+
+        // todo: an extra loop just for this?
+        for (_key, text_edit) in self.text_edits.iter_mut() {
+            text_edit.text_changed = false;
+        }
 
         // todo: not sure if this works correctly with multi-window.
         if !self.shared.rebuild_glyph_quad_buffer && self.using_frame_based_visibility {

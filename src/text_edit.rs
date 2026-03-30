@@ -121,6 +121,8 @@ pub struct TextEdit {
     pub(crate) showing_placeholder: bool,
     pub(crate) placeholder_text: Option<Cow<'static, str>>,
     pub(crate) placeholder_text_identity: Option<TextIdentity>,
+    /// Whether the text was changed by user input since the last frame.
+    pub(crate) text_changed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -156,6 +158,7 @@ impl TextEdit {
             showing_placeholder: false,
             placeholder_text: None,
             placeholder_text_identity: None,
+            text_changed: false,
         }
     }
 }
@@ -530,6 +533,7 @@ impl TextEdit {
         self.clear_placeholder();
 
         self.replace_selection_and_record(s);
+        self.text_changed = true;
     }
 
     /// Replaces the current selection with the given string.
@@ -560,6 +564,8 @@ impl TextEdit {
                 self.text_box.shared_mut().rebuild_glyph_quad_buffer = true;
             }
         }
+
+        
     }
 
     /// Delete the selection.
@@ -790,11 +796,14 @@ impl TextEdit {
 
             let prev_selection = op.prev_selection;
             self.text_box.set_selection(prev_selection);
-            
+
             if self.single_line {
                 self.remove_newlines();
             }
+            self.text_changed = true;
         }
+
+        self.restore_placeholder_if_any();
     }
 
     pub(crate) fn redo(&mut self) {
@@ -819,11 +828,14 @@ impl TextEdit {
 
             self.refresh_layout();
             self.text_box.selection = Cursor::from_byte_index(&self.text_box.layout, end, Affinity::Upstream).into();
-            
+
             if self.single_line {
                 self.remove_newlines();
             }
+            self.text_changed = true;
         }
+
+        self.restore_placeholder_if_any();
     }
 
     pub(crate) fn replace_selection_inner(&mut self, s: &str) {
@@ -1227,6 +1239,13 @@ impl TextEdit {
         self.showing_placeholder
     }
 
+    /// Returns `true` if the text was changed by user input since the last frame.
+    ///
+    /// This flag is cleared at the start of each frame (in `prepare_all`).
+    pub fn text_changed(&self) -> bool {
+        self.text_changed
+    }
+
     /// Returns the next time the cursor should blink.
     pub fn next_blink_time(&self) -> Option<Instant> {
         self.start_time.map(|start_time| {
@@ -1465,6 +1484,71 @@ impl TextEdit {
         self.text_box.set_text(new_text);
         self.text_box.move_to_text_end();
         // Clear any composition state
+        self.compose = None;
+        self.restore_placeholder_if_any();
+    }
+
+    /// Set the text of the text edit box, using a hash to detect if unchanged.
+    ///
+    /// If called again with the same text, it will detect unchanged and skip work.
+    /// Useful for declarative APIs.
+    pub fn set_text_hashed(&mut self, new_text: &str) {
+        if self.showing_placeholder && new_text == "" {
+            return;
+        }
+        let new_identity = TextIdentity::Hash(hash_text(new_text));
+        if self.text_box.text_identity == Some(new_identity) {
+            return;
+        }
+        self.text_box.set_text_hashed(new_text);
+        self.text_box.move_to_text_end();
+        self.compose = None;
+        self.restore_placeholder_if_any();
+    }
+
+    /// Sets the text of the text edit box, using pointer identity to detect if unchanged.
+    ///
+    /// Only use when the string reference is stable (e.g. from an immutable source).
+    /// If called again with the same pointer, it will skip work.
+    pub fn set_text_with_pointer_check(&mut self, new_text: &str) {
+        if self.showing_placeholder && new_text == "" {
+            return;
+        }
+        let new_identity = TextIdentity::Pointer(new_text as *const str);
+        if self.text_box.text_identity == Some(new_identity) {
+            return;
+        }
+        self.text_box.set_text_with_pointer_check(new_text);
+        self.text_box.move_to_text_end();
+        self.compose = None;
+        self.restore_placeholder_if_any();
+    }
+
+    /// Sets the text to a static string reference.
+    pub fn set_static_text(&mut self, text: &'static str) {
+        if self.showing_placeholder && text == "" {
+            return;
+        }
+        self.text_box.set_static_text(text);
+        self.text_box.move_to_text_end();
+        self.compose = None;
+        self.restore_placeholder_if_any();
+    }
+
+    /// Sets the text to a static string reference, using pointer identity to detect if unchanged.
+    ///
+    /// If called again with the same static string, it will skip work.
+    /// Useful for declarative APIs.
+    pub fn set_static_text_with_pointer_check(&mut self, text: &'static str) {
+        if self.showing_placeholder && text == "" {
+            return;
+        }
+        let new_identity = TextIdentity::Pointer(text as *const str);
+        if self.text_box.text_identity == Some(new_identity) {
+            return;
+        }
+        self.text_box.set_static_text_with_pointer_check(text);
+        self.text_box.move_to_text_end();
         self.compose = None;
         self.restore_placeholder_if_any();
     }
