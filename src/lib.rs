@@ -144,7 +144,7 @@ mod text_edit;
 pub use text_edit::*;
 
 mod gpu_slab;
-pub(crate) use gpu_slab::*;
+pub(crate) use gpu_slab::{GpuSlab, GpuSlabItem};
 
 
 #[cfg(feature = "accessibility")]
@@ -299,5 +299,77 @@ impl Transform2D {
             cos_r * x - sin_r * y + self.translation.0,
             sin_r * x + cos_r * y + self.translation.1,
         )
+    }
+}
+
+/// A handle to a retained group transform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupTransformHandle(pub(crate) usize);
+
+impl GroupTransformHandle {
+    /// A handle to the always-present identity transform.
+    pub const IDENTITY: Self = Self(0);
+}
+
+/// A group transform that can be shared across multiple text boxes.
+///
+/// This is a simple 2D transform with offset and uniform scale, matching the
+/// transform system in keru_draw.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Zeroable, Pod)]
+pub struct GroupTransform {
+    /// Translation offset in pixels (x, y)
+    pub offset: [f32; 2],
+    /// Uniform scale factor
+    pub scale: f32,
+    /// Padding for 16-byte alignment / slab metadata when free
+    pub _padding: f32,
+}
+
+impl GroupTransform {
+    /// Creates an identity group transform (no translation or scale).
+    pub const fn identity() -> Self {
+        Self {
+            offset: [0.0, 0.0],
+            scale: 1.0,
+            _padding: 0.0,
+        }
+    }
+
+    /// Creates a group transform with only translation.
+    pub const fn translation(x: f32, y: f32) -> Self {
+        Self {
+            offset: [x, y],
+            scale: 1.0,
+            _padding: 0.0,
+        }
+    }
+
+    /// Creates a group transform with only scale.
+    pub const fn scale(scale: f32) -> Self {
+        Self {
+            offset: [0.0, 0.0],
+            scale,
+            _padding: 0.0,
+        }
+    }
+}
+
+impl GpuSlabItem for GroupTransform {
+    fn next_free(&self) -> Option<usize> {
+        let bits = self._padding.to_bits();
+        if bits == u32::MAX {
+            None
+        } else {
+            Some(bits as usize)
+        }
+    }
+
+    fn set_next_free(&mut self, i: Option<usize>) {
+        let bits = match i {
+            Some(idx) => idx as u32,
+            None => u32::MAX,
+        };
+        self._padding = f32::from_bits(bits);
     }
 }

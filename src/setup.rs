@@ -64,6 +64,17 @@ const BIND_GROUP_LAYOUT_DESC: BindGroupLayoutDescriptor = wgpu::BindGroupLayoutD
                 min_binding_size: None,
             },
             count: None,
+        },
+        // Group transforms storage buffer
+        BindGroupLayoutEntry {
+            binding: 6,
+            visibility: ShaderStages::VERTEX,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
         }
     ],
     label: Some("bind group layout"),
@@ -122,6 +133,15 @@ pub(crate) fn create_vertex_buffer(device: &Device, size: u64) -> Buffer {
 pub(crate) fn create_box_data_buffer(device: &Device, size: u64) -> Buffer {
     device.create_buffer(&BufferDescriptor {
         label: Some("box data buffer"),
+        size,
+        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
+pub(crate) fn create_group_transform_buffer(device: &Device, size: u64) -> Buffer {
+    device.create_buffer(&BufferDescriptor {
+        label: Some("group transform buffer"),
         size,
         usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
         mapped_at_creation: false,
@@ -240,6 +260,7 @@ impl TextRenderer {
 
         let vertex_buffer = create_vertex_buffer(&device, INITIAL_BUFFER_SIZE);
         let box_data_buffer = create_box_data_buffer(&device, 1024 * std::mem::size_of::<BoxGpu>() as u64);
+        let group_transform_buffer = create_group_transform_buffer(&device, 64 * std::mem::size_of::<GroupTransform>() as u64);
 
         let (mask_texture_array, color_texture_array) = rebuild_texture_arrays(
             &device,
@@ -258,6 +279,7 @@ impl TextRenderer {
             &sampler,
             &params_buffer,
             &box_data_buffer,
+            &group_transform_buffer,
             &bind_group_layout,
         );
 
@@ -274,6 +296,7 @@ impl TextRenderer {
             params_buffer,
             vertex_buffer,
             box_data_buffer,
+            group_transform_buffer,
             srgb,
         };
     }
@@ -288,6 +311,7 @@ pub(crate) fn create_bind_group(
     sampler: &wgpu::Sampler,
     params_buffer: &wgpu::Buffer,
     box_data_buffer: &wgpu::Buffer,
+    group_transform_buffer: &wgpu::Buffer,
     bind_group_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::BindGroup {
 
@@ -325,6 +349,10 @@ pub(crate) fn create_bind_group(
         wgpu::BindGroupEntry {
             binding: 5,
             resource: box_data_buffer.as_entire_binding(),
+        },
+        wgpu::BindGroupEntry {
+            binding: 6,
+            resource: group_transform_buffer.as_entire_binding(),
         },
     ];
 

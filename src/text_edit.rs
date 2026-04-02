@@ -1653,14 +1653,14 @@ impl TextEdit {
         }
     }
 
-    /// Sets the transform of the text box.
+    /// Sets the transform of the text edit box.
     pub fn set_transform(&mut self, transform: Transform2D) {
         self.text_box.set_transform(transform);
     }
 
-    /// Sets the transform of the text box without updating the retained transform.
-    pub fn set_transformed_transform(&mut self, transform: Transform2D) {
-        self.text_box.set_transformed_transform(transform);
+    /// Sets the text edit box to use a group transform in addition to its own one
+    pub fn set_group_transform(&mut self, transform: GroupTransformHandle) {
+        self.text_box.group_transform_index = Some(transform);
     }
 
     /// Returns the current transform of the text box.

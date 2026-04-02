@@ -1,3 +1,9 @@
+struct GroupTransform {
+    float2 offset;
+    float scale;
+    float _padding;
+}
+
 struct BoxGpu {
     float2 clip_rect_x;
     float2 clip_rect_y;
@@ -9,6 +15,8 @@ struct BoxGpu {
     float2 scroll_offset;
     uint slab_metadata;
     float depth;
+    uint group_transform_index;
+    uint _padding;
 }
 
 struct GlyphQuad {
@@ -35,6 +43,7 @@ struct Text {
     StructuredBuffer<GlyphQuad> quads;
     ConstantBuffer<Params> params;
     StructuredBuffer<BoxGpu> box_data;
+    StructuredBuffer<GroupTransform> group_transforms;
 }
 
 ParameterBlock<Text> keru_text;
@@ -117,6 +126,7 @@ void text_vertex(
 ) {
     GlyphQuad quad = keru_text.quads[instanceIndex];
     BoxGpu box = keru_text.box_data[quad.box_index];
+    GroupTransform group_transform = keru_text.group_transforms[box.group_transform_index];
 
     float2 uv01 = float2(
         vertexIndex & 1u,
@@ -144,8 +154,11 @@ void text_vertex(
     // Translate
     float2 transformed_pos = rotated_pos + box.translation;
 
+    // Apply group transform
+    float2 group_transformed_pos = transformed_pos * group_transform.scale + group_transform.offset;
+
     // Convert to NDC
-    float2 ndc = (transformed_pos / resolution) * 2.0 - 1.0;
+    float2 ndc = (group_transformed_pos / resolution) * 2.0 - 1.0;
     position = float4(ndc.x, -ndc.y, 0.0, 1.0);
 
     // Calculate UV coordinates for texture atlas

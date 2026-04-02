@@ -49,6 +49,7 @@ pub struct TextBox {
 
     pub(crate) needs_relayout: bool,
     pub(crate) transform: Transform2D,
+    pub(crate) group_transform_index: Option<GroupTransformHandle>,
     pub(crate) max_advance: f32,
     pub(crate) depth: f32,
     pub(crate) selection: Selection,
@@ -167,6 +168,7 @@ impl TextBox {
             selectable: true,
             needs_relayout: true,
             transform: position,
+            group_transform_index: None,
             max_advance: size.0,
             height: size.1,
             depth,
@@ -315,7 +317,7 @@ impl TextBox {
     // 
     // Note that the unsafe pointer isn't REALLY needed. We could make the library work the same way without it. (i.e. have the interface where the user calls get_text_box() and gets a single text box, which can also access the Shared state for styles and other shared stuff).
     // We'd just have to make a wrapper struct that holds a ref to the TextBox and a ref to Shared, and make get_text_box() return that.
-    // However, such a wrapper struct has worse erdonomigcs: we would need to have separate structs for TextBox and TextBoxMut, the user would need to make the TextBoxMut binding itself mutable, etc.   
+    // However, such a wrapper struct has worse erdonomics: we would need to have separate structs for TextBox and TextBoxMut, the user would need to make the TextBoxMut binding itself mutable, etc.   
     // The point of the unsafe pointer is purely to avoid these ergonomic downsides, not to enable an intrinsecally un-Rust-y pattern.
     pub(crate) fn shared_mut(&mut self) -> &mut Shared {
         unsafe { self.shared_backref.as_mut() }
@@ -856,23 +858,9 @@ impl TextBox {
         self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
-    /// Sets the transform of the text box without updating the retained transform.
-    pub fn set_transformed_transform(&mut self, transform: Transform2D) {
-        if self.transform.translation == transform.translation
-            && self.transform.rotation == transform.rotation
-            && self.transform.scale == transform.scale
-        {
-            return;
-        }
-        self.transform.translation = transform.translation;
-        self.transform.rotation = transform.rotation;
-        self.transform.scale = transform.scale;
-        let i = self.render_data_info.box_index;
-        let box_data = self.shared_mut().render_data.box_data.get_mut(i);
-        box_data.translation = [transform.translation.0, transform.translation.1];
-        box_data.rotation = transform.rotation;
-        box_data.scale = transform.scale;
-        self.shared_mut().render_data.needs_box_data_sync = true;
+    /// Sets the text box to use a group transform in addition to its own one.
+    pub fn set_group_transform(&mut self, transform: GroupTransformHandle) {
+        self.group_transform_index = Some(transform);
     }
 
     /// Returns the current transform of the text box.

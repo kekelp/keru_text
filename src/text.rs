@@ -519,6 +519,33 @@ impl Text {
 
             self.shared.render_data.needs_box_data_sync = false;
         }
+
+        // Sync group_transforms buffer if needed
+        if self.shared.render_data.needs_group_transforms_sync {
+            let group_transforms_required_size = (self.shared.render_data.group_transforms.len().max(1) * std::mem::size_of::<GroupTransform>()) as u64;
+
+            // Grow group_transforms buffer if needed
+            if self.renderer.group_transform_buffer.size() < group_transforms_required_size {
+                let min_size = u64::max(group_transforms_required_size, 64 * std::mem::size_of::<GroupTransform>() as u64);
+                let growth_size = min_size * 3 / 2;
+                let current_growth = self.renderer.group_transform_buffer.size() * 3 / 2;
+                let new_size = u64::max(growth_size, current_growth);
+
+                self.renderer.group_transform_buffer = create_group_transform_buffer(&self.renderer.device, new_size);
+                self.renderer.recreate_bind_group();
+            }
+
+            // Write all group_transforms to buffer
+            if self.shared.render_data.group_transforms.len() != 0 {
+                let bytes: &[u8] = bytemuck::cast_slice(&self.shared.render_data.group_transforms.as_slice());
+                self.renderer.queue.write_buffer(&self.renderer.group_transform_buffer, 0, bytes);
+                #[cfg(debug_assertions)] {
+                    self.shared.render_data.stats.gpu_bytes += bytes.len() as u64;
+                }
+            }
+
+            self.shared.render_data.needs_group_transforms_sync = false;
+        }
     }
 
     /// Render all prepared text using the provided render pass.
@@ -809,10 +836,42 @@ impl Text {
     }
 
     /// Remove a text style.
-    /// 
+    ///
     /// If any text boxes are set to this style, they will revert to the default style.
     pub fn remove_style(&mut self, handle: StyleHandle) {
         self.shared.styles.remove(handle.key);
+    }
+
+    /// Insert a group transform and return a handle.
+    ///
+    /// Group transforms can be shared across multiple text boxes and are applied
+    /// after the per-box transform.
+    #[must_use]
+    pub fn insert_group_transform(&mut self, transform: GroupTransform) -> GroupTransformHandle {
+        let index = self.shared.render_data.group_transforms.insert(transform);
+        self.shared.render_data.needs_group_transforms_sync = true;
+        GroupTransformHandle(index)
+    }
+
+    /// Remove a group transform.
+    ///
+    /// Text boxes using this transform should have their group_transform_index cleared first.
+    pub fn remove_group_transform(&mut self, handle: GroupTransformHandle) {
+        self.shared.render_data.group_transforms.remove(handle.0);
+        self.shared.render_data.needs_group_transforms_sync = true;
+    }
+
+    /// Update a group transform.
+    ///
+    /// All text boxes using this transform will be affected.
+    pub fn update_group_transform(&mut self, handle: GroupTransformHandle, transform: GroupTransform) {
+        self.shared.render_data.group_transforms[handle.0] = transform;
+        self.shared.render_data.needs_group_transforms_sync = true;
+    }
+
+    /// Get the value of a group transform.
+    pub fn get_group_transform(&self, handle: GroupTransformHandle) -> GroupTransform {
+        self.shared.render_data.group_transforms[handle.0]
     }
 
 

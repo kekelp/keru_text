@@ -31,12 +31,14 @@ pub(crate) struct RenderData {
 
     pub(crate) glyph_quads: Vec<GlyphQuad>,
     pub(crate) box_data: GpuSlab<BoxGpu>,
+    pub(crate) group_transforms: GpuSlab<GroupTransform>,
 
     pub(crate) params: Params,
     pub(crate) atlas_size: u32,
 
     pub(crate) needs_glyph_sync: bool,
     pub(crate) needs_box_data_sync: bool,
+    pub(crate) needs_group_transforms_sync: bool,
     pub(crate) needs_texture_array_rebuild: bool,
     pub(crate) needs_params_sync: bool,
 
@@ -125,8 +127,10 @@ pub struct BoxGpu {
     pub screen_clip_x: [f32; 2],          // 8 bytes - (min_x, max_x) in screen space
     pub screen_clip_y: [f32; 2],          // 8 bytes - (min_y, max_y) in screen space
     pub scroll_offset: [f32; 2],          // 8 bytes - scroll offset applied before transform
-    pub slab_metadata: u32,
+    pub slab_metadata: u32,               // 4 bytes
     pub depth: f32,                       // 4 bytes - z-order for rendering
+    pub group_transform_index: u32,       // 4 bytes - index into group_transforms buffer
+    pub _padding: u32,                    // 4 bytes - padding for alignment
 }
 
 impl GpuSlabItem for BoxGpu {
@@ -183,7 +187,7 @@ fn pack_flags_and_page(flags: u32, page_index: u32) -> u32 {
     (flags & 0xFFFFFF) | ((page_index & 0xFF) << 24)
 }
 
-fn create_box_data(clip_rect: Option<BoundingBox>, scroll_offset: (f32, f32), transform: Transform2D, screen_clip: Option<BoundingBox>, depth: f32) -> BoxGpu {
+fn create_box_data(clip_rect: Option<BoundingBox>, scroll_offset: (f32, f32), transform: Transform2D, screen_clip: Option<BoundingBox>, depth: f32, group_transform_index: u32) -> BoxGpu {
     // clip_rect from effective_clip_rect() is already in layout-local coordinates (includes scroll_offset)
     let (clip_rect_x, clip_rect_y) = if let Some(clip) = clip_rect {
         (
@@ -213,6 +217,8 @@ fn create_box_data(clip_rect: Option<BoundingBox>, scroll_offset: (f32, f32), tr
         scroll_offset: [scroll_offset.0, scroll_offset.1],
         slab_metadata: 0,
         depth,
+        group_transform_index,
+        _padding: 0,
     }
 }
 
@@ -387,6 +393,11 @@ impl RenderData {
             color_atlas_pages,
             glyph_quads: Vec::with_capacity(1000),
             box_data: GpuSlab::with_capacity(30),
+            group_transforms: {
+                let mut slab = GpuSlab::with_capacity(16);
+                let _ = slab.insert(GroupTransform::identity()); // Index 0 is always identity
+                slab
+            },
             params: Params {
                 screen_resolution_width: 0.0,
                 screen_resolution_height: 0.0,
@@ -396,6 +407,7 @@ impl RenderData {
             atlas_size,
             needs_glyph_sync: true,
             needs_box_data_sync: true,
+            needs_group_transforms_sync: true,
             needs_texture_array_rebuild: false,
             needs_params_sync: true,
             cursor_quad_index: None,
@@ -535,12 +547,14 @@ impl RenderData {
 
         // Update BoxGpu
         let box_index = text_box.render_data_info.box_index;
+        let group_transform_index = text_box.group_transform_index.map(|h| h.0 as u32).unwrap_or(0);
         *self.box_data.get_mut(box_index) = create_box_data(
             clip_rect,
             scroll_offset,
             text_box.transform(),
             screen_clip,
-            text_box.depth
+            text_box.depth,
+            group_transform_index
         );
 
         // Rebuild cached quads if invalid (generation mismatch means either text changed or glyphs were evicted)

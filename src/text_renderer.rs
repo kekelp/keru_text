@@ -19,6 +19,7 @@ pub(crate) struct TextRenderer {
 
     pub(crate) vertex_buffer: Buffer,
     pub(crate) box_data_buffer: Buffer,
+    pub(crate) group_transform_buffer: Buffer,
 
     pub(crate) srgb: bool,
 }
@@ -148,6 +149,7 @@ impl TextRenderer {
             &self.sampler,
             &self.params_buffer,
             &self.box_data_buffer,
+            &self.group_transform_buffer,
             &self.bind_group_layout,
         );
 
