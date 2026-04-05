@@ -867,7 +867,6 @@ impl Text {
     pub fn update_group_transform(&mut self, handle: GroupTransformHandle, transform: GroupTransform) {
         self.shared.render_data.group_transforms[handle.0] = transform;
         self.shared.render_data.needs_group_transforms_sync = true;
-        dbg!(transform);
     }
 
     /// Get the value of a group transform.

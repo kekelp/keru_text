@@ -1129,6 +1129,7 @@ dependencies = [
 [[package]]
 name = "fontique"
 version = "0.7.0"
+source = "git+https://github.com/kekelp/parley#5d555693a9f0d6a91d1f361beba77267a6c8a0d9"
 dependencies = [
  "hashbrown 0.16.1",
  "linebender_resource_handle",
@@ -2445,6 +2446,7 @@ dependencies = [
 [[package]]
 name = "parley"
 version = "0.7.0"
+source = "git+https://github.com/kekelp/parley#5d555693a9f0d6a91d1f361beba77267a6c8a0d9"
 dependencies = [
  "accesskit 0.24.0",
  "fontique",
@@ -2462,6 +2464,7 @@ dependencies = [
 [[package]]
 name = "parley_data"
 version = "0.0.0"
+source = "git+https://github.com/kekelp/parley#5d555693a9f0d6a91d1f361beba77267a6c8a0d9"
 dependencies = [
  "icu_collections",
  "icu_properties",
@@ -3255,6 +3258,7 @@ dependencies = [
 [[package]]
 name = "text_primitives"
 version = "0.1.0"
+source = "git+https://github.com/kekelp/parley#5d555693a9f0d6a91d1f361beba77267a6c8a0d9"
 
 [[package]]
 name = "thiserror"

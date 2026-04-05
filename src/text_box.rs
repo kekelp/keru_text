@@ -49,6 +49,7 @@ pub struct TextBox {
 
     pub(crate) needs_relayout: bool,
     pub(crate) transform: Transform2D,
+    // should get rid of it and have it only in the BoxData
     pub(crate) group_transform_index: Option<GroupTransformHandle>,
     pub(crate) max_advance: f32,
     pub(crate) depth: f32,
@@ -202,8 +203,7 @@ impl TextBox {
     #[must_use]
     pub(crate) fn hit_full_rect(&self, cursor_pos: (f64, f64)) -> bool {
         // Transform cursor position to text box local space
-        let inv_transform = self.transform().inverse().unwrap_or(Transform2D::identity());
-        let local_pos = inv_transform.transform_point(euclid::Point2D::new(cursor_pos.0 as f32, cursor_pos.1 as f32));
+        let local_pos = self.cursor_to_local(cursor_pos);
 
         let offset = (local_pos.x as f64, local_pos.y as f64);
 
@@ -229,8 +229,7 @@ impl TextBox {
     /// Used for determining when to extend selection to the next linked box.
     /// Returns true if the cursor is below the box, or on the last line and past the right edge.
     pub(crate) fn is_cursor_past_end(&self, cursor_pos: (f64, f64)) -> bool {
-        let inv_transform = self.transform().inverse().unwrap_or(Transform2D::identity());
-        let local_pos = inv_transform.transform_point(euclid::Point2D::new(cursor_pos.0 as f32, cursor_pos.1 as f32));
+        let local_pos = self.cursor_to_local(cursor_pos);
 
         // Past the bottom of the box
         if local_pos.y > self.height {
@@ -251,8 +250,7 @@ impl TextBox {
     /// Used for determining when to extend selection to the previous linked box.
     /// Returns true if the cursor is above the box, or on the first line and before the left edge.
     pub(crate) fn is_cursor_before_start(&self, cursor_pos: (f64, f64)) -> bool {
-        let inv_transform = self.transform().inverse().unwrap_or(Transform2D::identity());
-        let local_pos = inv_transform.transform_point(euclid::Point2D::new(cursor_pos.0 as f32, cursor_pos.1 as f32));
+        let local_pos = self.cursor_to_local(cursor_pos);
 
         // Before the top of the box
         if local_pos.y < 0.0 {
@@ -326,6 +324,28 @@ impl TextBox {
         unsafe { self.shared_backref.as_ref() }
     }
 
+    /// Transforms a screen-space cursor position to text box local space,
+    /// accounting for both the group transform (if any) and the per-box 
+    /// transform.
+    pub(crate) fn cursor_to_local(&self, cursor_pos: (f64, f64)) -> euclid::Point2D<f32, euclid::UnknownUnit> {
+        let mut pos = euclid::Point2D::new(cursor_pos.0 as f32, cursor_pos.1 as f32);
+         // First, inverse the group transform (if any)
+        if let Some(handle) = self.group_transform_index 
+        {
+            let group = &self.shared().render_data.group_transforms[handle.
+            0];
+            // Forward transform is: pos = pos * scale + offset
+            // Inverse is: pos = (pos - offset) / scale
+            if group.scale != 0.0 {
+                pos.x = (pos.x - group.offset[0]) / group.scale;                                   
+                pos.y = (pos.y - group.offset[1]) / group.scale;
+            }
+        }
+        // Then, inverse the per-box transform
+        let inv_transform = self.transform().inverse().unwrap_or(Transform2D::identity());
+        return inv_transform.transform_point(pos);
+    }
+    
 
     /// Returns a reference to the current style of the text box.
     pub fn style(&self) -> &TextStyle2 {
@@ -499,12 +519,11 @@ impl TextBox {
 
         match event {
             WindowEvent::CursorMoved { position, .. } => {
-                let cursor_pos = (position.x as f32, position.y as f32);
+                let cursor_pos = (position.x, position.y);
                 // macOS seems to generate a spurious move after selecting word?
                 if input_state.mouse.pointer_down {
                     // Transform cursor position to text box local space
-                    let inv_transform = self.transform().inverse().unwrap_or(Transform2D::identity());
-                    let local_pos = inv_transform.transform_point(euclid::Point2D::new(cursor_pos.0, cursor_pos.1));
+                    let local_pos = self.cursor_to_local(cursor_pos);
                     let left = 0.0f32;
                     let top = 0.0f32;
                     let scroll_offset_x = self.scroll_offset.0;
@@ -577,11 +596,7 @@ impl TextBox {
                 let shift = input_state.modifiers.state().shift_key();
                 if *button == winit::event::MouseButton::Left {
                     // Transform cursor position to text box local space
-                    let inv_transform = self.transform().inverse().unwrap_or(Transform2D::identity());
-                    let local_pos = inv_transform.transform_point(euclid::Point2D::new(
-                        input_state.mouse.cursor_pos.0 as f32,
-                        input_state.mouse.cursor_pos.1 as f32
-                    ));
+                    let local_pos = self.cursor_to_local(input_state.mouse.cursor_pos);
                     let cursor_pos = (
                         local_pos.x + self.scroll_offset.0,
                         local_pos.y + self.scroll_offset.1,
@@ -860,7 +875,14 @@ impl TextBox {
 
     /// Sets the text box to use a group transform in addition to its own one.
     pub fn set_group_transform(&mut self, transform: GroupTransformHandle) {
+        if self.group_transform_index == Some(transform) {
+            return;
+        }
+
+        let i = self.render_data_info.box_index;
+        self.shared_mut().render_data.box_data.get_mut(i).group_transform_index = transform.0 as u32;
         self.group_transform_index = Some(transform);
+        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Returns the current transform of the text box.
@@ -1345,9 +1367,7 @@ impl Ext1 for TextBox {
     fn hit_bounding_box(&mut self, cursor_pos: (f64, f64)) -> bool {
         self.refresh_layout();
         // Transform cursor position to text box local space
-        let inv_transform = self.transform().inverse().unwrap_or(Transform2D::identity());
-        let local_pos = inv_transform.transform_point(euclid::Point2D::new(cursor_pos.0 as f32, cursor_pos.1 as f32));
-
+        let local_pos = self.cursor_to_local(cursor_pos);
         let offset = (local_pos.x as f64, local_pos.y as f64);
 
         // If explicit hitbox is set, use it
