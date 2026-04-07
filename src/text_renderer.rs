@@ -18,8 +18,6 @@ pub(crate) struct TextRenderer {
     pub(crate) atlas_size: u32,
 
     pub(crate) vertex_buffer: Buffer,
-    pub(crate) box_data_buffer: Buffer,
-    pub(crate) group_transform_buffer: Buffer,
 
     pub(crate) srgb: bool,
 }
@@ -71,9 +69,7 @@ impl TextRenderer {
 
         self.mask_texture_array = mask_texture_array;
         self.color_texture_array = color_texture_array;
-
-        // Rebuild bind group after textures are updated
-        self.recreate_bind_group();
+        // Bind group recreation is handled by the caller (load_to_gpu)
     }
 
     pub(crate) fn update_texture_arrays(&mut self, render_data: &mut RenderData) {
@@ -140,19 +136,17 @@ impl TextRenderer {
     }
 
 
-    pub(crate) fn recreate_bind_group(&mut self) {
-        let bind_group = create_bind_group(
+    pub(crate) fn recreate_bind_group(&mut self, render_data: &RenderData) {
+        self.bind_group = create_bind_group(
             &self.device,
             &self.mask_texture_array,
             &self.color_texture_array,
             &self.vertex_buffer,
             &self.sampler,
             &self.params_buffer,
-            &self.box_data_buffer,
-            &self.group_transform_buffer,
+            &render_data.box_data,
+            &render_data.group_transforms,
             &self.bind_group_layout,
         );
-
-        self.bind_group = bind_group;
     }
 }

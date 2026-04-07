@@ -364,9 +364,19 @@ impl Text {
             version: 0,
         });
 
-        let renderer = TextRenderer::new_with_params(device.clone(), queue.clone(), format, depth_stencil, params);
-        let mut render_data = RenderData::new();
+        let atlas_size = params.atlas_page_size.size(device);
+        let mut render_data = RenderData::new(device, atlas_size);
         render_data.set_srgb(format.is_srgb());
+
+        let renderer = TextRenderer::new_with_params(
+            device.clone(),
+            queue.clone(),
+            format,
+            depth_stencil,
+            atlas_size,
+            &render_data.box_data,
+            &render_data.group_transforms,
+        );
 
         Self {
             text_boxes: SlotMap::with_capacity(10),
@@ -434,6 +444,18 @@ impl Text {
     ///
     /// Useful only for custom rendering.
     pub fn load_to_gpu(&mut self) {
+        let box_data_reallocated = self.shared.render_data.box_data.load_to_gpu(
+            &self.renderer.device,
+            &self.renderer.queue,
+            "box data buffer",
+        );
+        let group_transforms_reallocated = self.shared.render_data.group_transforms.load_to_gpu(
+            &self.renderer.device,
+            &self.renderer.queue,
+            "group transform buffer",
+        );
+        let mut needs_bind_group_recreate = box_data_reallocated || group_transforms_reallocated;
+
         // Update uniform buffer if needed
         if self.shared.render_data.needs_params_sync {
             let bytes: &[u8] = bytemuck::cast_slice(std::slice::from_ref(&self.shared.render_data.params));
@@ -445,6 +467,7 @@ impl Text {
         if self.shared.render_data.needs_texture_array_rebuild {
             self.renderer.rebuild_texture_arrays(&mut self.shared.render_data);
             self.shared.render_data.needs_texture_array_rebuild = false;
+            needs_bind_group_recreate = true;
         } else {
             self.renderer.update_texture_arrays(&mut self.shared.render_data);
         }
@@ -461,7 +484,7 @@ impl Text {
                 let new_size = u64::max(growth_size, current_growth);
 
                 self.renderer.vertex_buffer = create_vertex_buffer(&self.renderer.device, new_size);
-                self.renderer.recreate_bind_group();
+                needs_bind_group_recreate = true;
             }
 
             // Write all quads to vertex buffer
@@ -493,58 +516,8 @@ impl Text {
             self.shared.rerender_cursor = false;
         }
 
-        // Sync box_data buffer if needed
-        if self.shared.render_data.needs_box_data_sync {
-            let box_data_required_size = (self.shared.render_data.box_data.len() * std::mem::size_of::<BoxGpu>()) as u64;
-
-            // Grow box_data buffer if needed
-            if self.renderer.box_data_buffer.size() < box_data_required_size {
-                let min_size = u64::max(box_data_required_size, 1024 * std::mem::size_of::<BoxGpu>() as u64);
-                let growth_size = min_size * 3 / 2;
-                let current_growth = self.renderer.box_data_buffer.size() * 3 / 2;
-                let new_size = u64::max(growth_size, current_growth);
-
-                self.renderer.box_data_buffer = create_box_data_buffer(&self.renderer.device, new_size);
-                self.renderer.recreate_bind_group();
-            }
-
-            // Write all box_data to buffer
-            if self.shared.render_data.box_data.len() != 0 {
-                let bytes: &[u8] = bytemuck::cast_slice(&self.shared.render_data.box_data.as_slice());
-                self.renderer.queue.write_buffer(&self.renderer.box_data_buffer, 0, bytes);
-                #[cfg(debug_assertions)] {
-                    self.shared.render_data.stats.gpu_bytes += bytes.len() as u64;
-                }
-            }
-
-            self.shared.render_data.needs_box_data_sync = false;
-        }
-
-        // Sync group_transforms buffer if needed
-        if self.shared.render_data.needs_group_transforms_sync {
-            let group_transforms_required_size = (self.shared.render_data.group_transforms.len().max(1) * std::mem::size_of::<GroupTransform>()) as u64;
-
-            // Grow group_transforms buffer if needed
-            if self.renderer.group_transform_buffer.size() < group_transforms_required_size {
-                let min_size = u64::max(group_transforms_required_size, 64 * std::mem::size_of::<GroupTransform>() as u64);
-                let growth_size = min_size * 3 / 2;
-                let current_growth = self.renderer.group_transform_buffer.size() * 3 / 2;
-                let new_size = u64::max(growth_size, current_growth);
-
-                self.renderer.group_transform_buffer = create_group_transform_buffer(&self.renderer.device, new_size);
-                self.renderer.recreate_bind_group();
-            }
-
-            // Write all group_transforms to buffer
-            if self.shared.render_data.group_transforms.len() != 0 {
-                let bytes: &[u8] = bytemuck::cast_slice(&self.shared.render_data.group_transforms.as_slice());
-                self.renderer.queue.write_buffer(&self.renderer.group_transform_buffer, 0, bytes);
-                #[cfg(debug_assertions)] {
-                    self.shared.render_data.stats.gpu_bytes += bytes.len() as u64;
-                }
-            }
-
-            self.shared.render_data.needs_group_transforms_sync = false;
+        if needs_bind_group_recreate {
+            self.renderer.recreate_bind_group(&self.shared.render_data);
         }
     }
 
@@ -849,7 +822,6 @@ impl Text {
     #[must_use]
     pub fn insert_group_transform(&mut self, transform: GroupTransform) -> GroupTransformHandle {
         let index = self.shared.render_data.group_transforms.insert(transform);
-        self.shared.render_data.needs_group_transforms_sync = true;
         GroupTransformHandle(index)
     }
 
@@ -858,7 +830,6 @@ impl Text {
     /// Text boxes using this transform should have their group_transform_index cleared first.
     pub fn remove_group_transform(&mut self, handle: GroupTransformHandle) {
         self.shared.render_data.group_transforms.remove(handle.0);
-        self.shared.render_data.needs_group_transforms_sync = true;
     }
 
     /// Update a group transform.
@@ -866,7 +837,6 @@ impl Text {
     /// All text boxes using this transform will be affected.
     pub fn update_group_transform(&mut self, handle: GroupTransformHandle, transform: GroupTransform) {
         self.shared.render_data.group_transforms[handle.0] = transform;
-        self.shared.render_data.needs_group_transforms_sync = true;
     }
 
     /// Get the value of a group transform.
@@ -997,7 +967,6 @@ impl Text {
     /// Returns false if scroll has exceeded the tolerance from the base position (line culling),
     /// in which case the caller should fall back to a full re-prepare.
     fn handle_scroll_fast_path(&mut self) -> bool {
-        self.shared.render_data.needs_box_data_sync = true;
         for any_box in &self.scrolled_moved_indices {
             match any_box {
                 AnyBox::TextEdit(i) => {

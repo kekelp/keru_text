@@ -130,38 +130,20 @@ pub(crate) fn create_vertex_buffer(device: &Device, size: u64) -> Buffer {
     })
 }
 
-pub(crate) fn create_box_data_buffer(device: &Device, size: u64) -> Buffer {
-    device.create_buffer(&BufferDescriptor {
-        label: Some("box data buffer"),
-        size,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    })
-}
-
-pub(crate) fn create_group_transform_buffer(device: &Device, size: u64) -> Buffer {
-    device.create_buffer(&BufferDescriptor {
-        label: Some("group transform buffer"),
-        size,
-        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    })
-}
 
 
 impl TextRenderer {
     /// Create a new TextRenderer with the specified parameters.
-    pub fn new_with_params(
+    pub(crate) fn new_with_params(
         device: Device,
         queue: Queue,
         format: TextureFormat,
         depth_stencil: Option<DepthStencilState>,
-        params: TextRendererParams,
+        atlas_size: u32,
+        box_data: &GpuSlab<BoxGpu>,
+        group_transforms: &GpuSlab<GroupTransform>,
     ) -> Self {
         let srgb = format.is_srgb();
-
-        let atlas_size = params.atlas_page_size.size(&device);
-
 
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("sampler"),
@@ -259,8 +241,6 @@ impl TextRenderer {
         });
 
         let vertex_buffer = create_vertex_buffer(&device, INITIAL_BUFFER_SIZE);
-        let box_data_buffer = create_box_data_buffer(&device, 1024 * std::mem::size_of::<BoxGpu>() as u64);
-        let group_transform_buffer = create_group_transform_buffer(&device, 64 * std::mem::size_of::<GroupTransform>() as u64);
 
         let (mask_texture_array, color_texture_array) = rebuild_texture_arrays(
             &device,
@@ -278,8 +258,8 @@ impl TextRenderer {
             &vertex_buffer,
             &sampler,
             &params_buffer,
-            &box_data_buffer,
-            &group_transform_buffer,
+            box_data,
+            group_transforms,
             &bind_group_layout,
         );
 
@@ -295,8 +275,6 @@ impl TextRenderer {
             sampler,
             params_buffer,
             vertex_buffer,
-            box_data_buffer,
-            group_transform_buffer,
             srgb,
         };
     }
@@ -310,8 +288,8 @@ pub(crate) fn create_bind_group(
     vertex_buffer: &wgpu::Buffer,
     sampler: &wgpu::Sampler,
     params_buffer: &wgpu::Buffer,
-    box_data_buffer: &wgpu::Buffer,
-    group_transform_buffer: &wgpu::Buffer,
+    box_data: &GpuSlab<BoxGpu>,
+    group_transforms: &GpuSlab<GroupTransform>,
     bind_group_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::BindGroup {
 
@@ -346,14 +324,8 @@ pub(crate) fn create_bind_group(
             binding: 4,
             resource: params_buffer.as_entire_binding(),
         },
-        wgpu::BindGroupEntry {
-            binding: 5,
-            resource: box_data_buffer.as_entire_binding(),
-        },
-        wgpu::BindGroupEntry {
-            binding: 6,
-            resource: group_transform_buffer.as_entire_binding(),
-        },
+        box_data.bind_group_entry(5),
+        group_transforms.bind_group_entry(6),
     ];
 
     device.create_bind_group(&wgpu::BindGroupDescriptor {

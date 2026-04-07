@@ -10,7 +10,7 @@ use std::ops::{Index, IndexMut};
 pub struct GpuSlab<T: GpuSlabItem + Copy> {
     items: Vec<T>,
     first_free: Option<usize>,
-    buffer: Option<wgpu::Buffer>,
+    buffer: wgpu::Buffer,
     buffer_capacity: usize,
     label: String,
     dirty: bool,
@@ -25,19 +25,6 @@ pub trait GpuSlabItem {
 }
 
 impl<T: GpuSlabItem + Copy> GpuSlab<T> {
-    /// Create a new `GpuSlab` with at least the specified capacity.
-    /// The GPU buffer will be created on first call to `load_to_gpu`.
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            items: Vec::with_capacity(capacity),
-            first_free: None,
-            buffer: None,
-            buffer_capacity: 0,
-            label: String::new(),
-            dirty: true,
-        }
-    }
-
     /// Create a new `GpuSlab` with a GPU buffer.
     pub fn new(device: &wgpu::Device, capacity: usize, label: &str) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -50,7 +37,7 @@ impl<T: GpuSlabItem + Copy> GpuSlab<T> {
         Self {
             items: Vec::with_capacity(capacity),
             first_free: None,
-            buffer: Some(buffer),
+            buffer: buffer,
             buffer_capacity: capacity,
             label: label.to_string(),
             dirty: false,
@@ -86,10 +73,6 @@ impl<T: GpuSlabItem + Copy> GpuSlab<T> {
         self.first_free = Some(i);
     }
 
-    /// Get the number of slots (including free slots).
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
 
     /// Get a mutable reference to an item.
     pub fn get_mut(&mut self, i: usize) -> &mut T {
@@ -97,80 +80,45 @@ impl<T: GpuSlabItem + Copy> GpuSlab<T> {
         &mut self.items[i]
     }
 
-    /// Clear all items from the slab.
-    pub fn clear(&mut self) {
-        if !self.items.is_empty() {
-            self.items.clear();
-            self.first_free = None;
-            self.dirty = true;
-        }
-    }
-
-    /// Get a reference to the item storage as a slice, including both occupied and unoccupied items.
-    pub fn as_slice(&self) -> &[T] {
-        &self.items
-    }
-
     /// Updates the underlying GPU buffer with current data.
     /// Returns true if the buffer was reallocated.
-    ///
-    /// For slabs created with `with_capacity`, this will create the buffer on first call.
     pub fn load_to_gpu(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, label: &str) -> bool {
-        if !self.dirty && self.buffer.is_some() {
+        if !self.dirty {
             return false;
         }
 
-        let needs_new_buffer = self.buffer.is_none() || self.items.len() > self.buffer_capacity;
+        let needs_new_buffer = self.items.len() > self.buffer_capacity;
         if needs_new_buffer {
             self.buffer_capacity = self.items.len().max(1).next_power_of_two();
             self.label = label.to_string();
-            self.buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
+            self.buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
                 size: (size_of::<T>() * self.buffer_capacity) as u64,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
-            }));
+            });
         }
 
         if !self.items.is_empty() {
-            if let Some(buffer) = &self.buffer {
-                let size = self.items.len() * size_of::<T>();
-                queue.write_buffer(buffer, 0, unsafe {
-                    std::slice::from_raw_parts(self.items[..].as_ptr() as *const u8, size)
-                });
-            }
+            let size = self.items.len() * size_of::<T>();
+            queue.write_buffer(&self.buffer, 0, unsafe {
+                std::slice::from_raw_parts(self.items[..].as_ptr() as *const u8, size)
+            });
         }
 
         self.dirty = false;
         needs_new_buffer
     }
 
-    pub fn bind_group_layout_entry(binding_index: u32) -> wgpu::BindGroupLayoutEntry {
-        wgpu::BindGroupLayoutEntry {
-            binding: binding_index,
-            visibility: wgpu::ShaderStages::FRAGMENT.union(wgpu::ShaderStages::VERTEX),
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: Some(std::num::NonZeroU64::new(size_of::<T>() as u64).unwrap()),
-            },
-            count: None,
-        }
-    }
-
     pub fn bind_group_entry(&self, binding_index: u32) -> wgpu::BindGroupEntry<'_> {
         wgpu::BindGroupEntry {
             binding: binding_index,
             resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                buffer: self.buffer.as_ref().expect("GpuSlab buffer not initialized - call load_to_gpu first"),
+                buffer: &self.buffer,
                 offset: 0,
                 size: None,
             }),
         }
-    }
-
-    pub fn buffer(&self) -> Option<&wgpu::Buffer> {
-        self.buffer.as_ref()
     }
 }
 

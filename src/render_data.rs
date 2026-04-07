@@ -37,8 +37,6 @@ pub(crate) struct RenderData {
     pub(crate) atlas_size: u32,
 
     pub(crate) needs_glyph_sync: bool,
-    pub(crate) needs_box_data_sync: bool,
-    pub(crate) needs_group_transforms_sync: bool,
     pub(crate) needs_texture_array_rebuild: bool,
     pub(crate) needs_params_sync: bool,
 
@@ -361,13 +359,8 @@ impl UselessTrait2 for Placement {
 }
 
 impl RenderData {
-    /// Create a new RenderData with default parameters.
-    pub fn new() -> Self {
-        Self::new_with_atlas_size(2048) // Default atlas size
-    }
-
     /// Create a new RenderData with a specific atlas size.
-    pub fn new_with_atlas_size(atlas_size: u32) -> Self {
+    pub fn new(device: &wgpu::Device, atlas_size: u32) -> Self {
         let glyph_cache = LruCache::unbounded_with_hasher(BuildHasherDefault::<FxHasher>::default());
 
         let mask_atlas_pages = vec![AtlasPage {
@@ -392,9 +385,9 @@ impl RenderData {
             mask_atlas_pages,
             color_atlas_pages,
             glyph_quads: Vec::with_capacity(1000),
-            box_data: GpuSlab::with_capacity(30),
+            box_data: GpuSlab::new(device, 30, "box data buffer"),
             group_transforms: {
-                let mut slab = GpuSlab::with_capacity(16);
+                let mut slab = GpuSlab::new(device, 16, "group transform buffer");
                 let _ = slab.insert(GroupTransform::identity()); // Index 0 is always identity
                 slab
             },
@@ -406,8 +399,6 @@ impl RenderData {
             },
             atlas_size,
             needs_glyph_sync: true,
-            needs_box_data_sync: true,
-            needs_group_transforms_sync: true,
             needs_texture_array_rebuild: false,
             needs_params_sync: true,
             cursor_quad_index: None,
@@ -622,7 +613,6 @@ impl RenderData {
         }
 
         self.needs_glyph_sync = true;
-        self.needs_box_data_sync = true;
 
         if text_box.is_scroll_distance_above_tolerance() {
             text_box.render_data_info.cache_generation = 0;

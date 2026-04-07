@@ -851,7 +851,6 @@ impl TextBox {
         self.transform.translation = new_translation;
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).translation = [pos.0 as f32, pos.1 as f32];
-        self.shared_mut().render_data.needs_box_data_sync = true;       
     }
 
     /// Sets the transform of the text box.
@@ -870,7 +869,6 @@ impl TextBox {
         box_data.translation = [transform.translation.0, transform.translation.1];
         box_data.rotation = transform.rotation;
         box_data.scale = transform.scale;
-        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Sets the text box to use a group transform in addition to its own one.
@@ -882,7 +880,6 @@ impl TextBox {
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).group_transform_index = transform.0 as u32;
         self.group_transform_index = Some(transform);
-        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Returns the current transform of the text box.
@@ -902,7 +899,6 @@ impl TextBox {
         self.transform.translation = (x, y);
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).translation = [x, y];
-        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Sets the rotation of the text box in radians.
@@ -913,7 +909,6 @@ impl TextBox {
         self.transform.rotation = radians;
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).rotation = radians;
-        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Hides or unhides the text box.
@@ -936,7 +931,6 @@ impl TextBox {
         self.depth = depth;
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).depth = depth;
-        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Sets a screen-space clip rect.
@@ -959,7 +953,6 @@ impl TextBox {
                 box_data.screen_clip_y = [f32::NEG_INFINITY, f32::INFINITY];
             }
         }
-        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Sets whether automatic clipping to the text box bounds is enabled.
@@ -1002,7 +995,6 @@ impl TextBox {
             box_data.clip_rect_x = [offset.0, offset.0 + max_advance];
             box_data.clip_rect_y = [offset.1, offset.1 + height];
         }
-        self.shared_mut().render_data.needs_box_data_sync = true;
     }
 
     /// Sets the style for the text box.
