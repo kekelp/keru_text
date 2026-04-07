@@ -473,6 +473,8 @@ impl Text {
             self.renderer.update_texture_arrays(&mut self.shared.render_data);
         }
 
+        // Update cursor color if needed
+        let glyph_quads = &mut self.shared.render_data.glyph_quads;
         if self.shared.rerender_cursor {
             if let Some(cursor_index) = self.shared.render_data.cursor_quad_index {
                 let color = if self.shared.cursor_blink_animation_currently_visible {
@@ -480,19 +482,29 @@ impl Text {
                 } else {
                     0x00_00_00_00
                 };
-                self.shared.render_data.glyph_quads[cursor_index].color = color;
+                glyph_quads.data[cursor_index].color = color;
             }
-            self.shared.rerender_cursor = false;
         }
 
         // Sync quads buffer
-        let glyph_quads_reallocated = self.shared.render_data.glyph_quads.load_to_gpu(
-            &self.renderer.device,
-            &self.renderer.queue,
-        );
-        if glyph_quads_reallocated {
-            needs_bind_group_recreate = true;
+        if glyph_quads.dirty {
+            // Normal sync
+            let glyph_quads_reallocated = glyph_quads.load_to_gpu(
+                &self.renderer.device,
+                &self.renderer.queue,
+            );
+            if glyph_quads_reallocated {
+                needs_bind_group_recreate = true;
+            }
+        } else if self.shared.rerender_cursor {
+            // Do a small sync for just the blinking cursor
+            if let Some(cursor_index) = self.shared.render_data.cursor_quad_index {
+                let bytes: &[u8] = bytemuck::cast_slice(std::slice::from_ref(&glyph_quads.data[cursor_index]));
+                let offset = (cursor_index * std::mem::size_of::<GlyphQuad>()) as u64;
+                self.renderer.queue.write_buffer(&glyph_quads.buffer, offset, bytes);
+            }
         }
+        self.shared.rerender_cursor = false;
 
         if needs_bind_group_recreate {
             self.renderer.recreate_bind_group(&self.shared.render_data);

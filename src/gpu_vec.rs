@@ -3,11 +3,11 @@ use std::ops::{Index, IndexMut};
 use wgpu::*;
 
 pub struct GpuVec<T: Copy> {
-    data: Vec<T>,
-    buffer: wgpu::Buffer,
+    pub(crate) data: Vec<T>,
+    pub(crate) buffer: wgpu::Buffer,
     buffer_capacity: usize,
     label: String,
-    dirty: bool,
+    pub(crate) dirty: bool,
     usage: wgpu::BufferUsages,
 }
 
