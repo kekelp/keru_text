@@ -376,6 +376,7 @@ impl Text {
             atlas_size,
             &render_data.box_data,
             &render_data.group_transforms,
+            &render_data.glyph_quads,
         );
 
         Self {
@@ -472,34 +473,7 @@ impl Text {
             self.renderer.update_texture_arrays(&mut self.shared.render_data);
         }
 
-        // Sync quads buffer if needed
-        if self.shared.render_data.needs_glyph_sync {
-            let required_size = (self.shared.render_data.glyph_quads.len() * std::mem::size_of::<GlyphQuad>()) as u64;
-
-            // Grow shared vertex buffer if needed
-            if self.renderer.vertex_buffer.size() < required_size {
-                let min_size = u64::max(required_size, INITIAL_BUFFER_SIZE);
-                let growth_size = min_size * 3 / 2;
-                let current_growth = self.renderer.vertex_buffer.size() * 3 / 2;
-                let new_size = u64::max(growth_size, current_growth);
-
-                self.renderer.vertex_buffer = create_vertex_buffer(&self.renderer.device, new_size);
-                needs_bind_group_recreate = true;
-            }
-
-            // Write all quads to vertex buffer
-            if !self.shared.render_data.glyph_quads.is_empty() {
-                let bytes: &[u8] = bytemuck::cast_slice(&self.shared.render_data.glyph_quads);
-                self.renderer.queue.write_buffer(&self.renderer.vertex_buffer, 0, bytes);
-                #[cfg(debug_assertions)] {
-                    self.shared.render_data.stats.gpu_bytes += bytes.len() as u64;
-                }
-            }
-
-            self.shared.render_data.needs_glyph_sync = false;
-            self.shared.rerender_cursor = false;
-        } else if self.shared.rerender_cursor {
-            // Cursor-blink-only sync: just update the cursor quad's color
+        if self.shared.rerender_cursor {
             if let Some(cursor_index) = self.shared.render_data.cursor_quad_index {
                 let color = if self.shared.cursor_blink_animation_currently_visible {
                     CURSOR_COLOR
@@ -507,13 +481,17 @@ impl Text {
                     0x00_00_00_00
                 };
                 self.shared.render_data.glyph_quads[cursor_index].color = color;
-
-                let bytes: &[u8] = bytemuck::cast_slice(&self.shared.render_data.glyph_quads[cursor_index..cursor_index + 1]);
-                let offset = (cursor_index * std::mem::size_of::<GlyphQuad>()) as u64;
-                self.renderer.queue.write_buffer(&self.renderer.vertex_buffer, offset, bytes);
             }
-
             self.shared.rerender_cursor = false;
+        }
+
+        // Sync quads buffer
+        let glyph_quads_reallocated = self.shared.render_data.glyph_quads.load_to_gpu(
+            &self.renderer.device,
+            &self.renderer.queue,
+        );
+        if glyph_quads_reallocated {
+            needs_bind_group_recreate = true;
         }
 
         if needs_bind_group_recreate {

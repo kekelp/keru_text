@@ -1,8 +1,5 @@
 use crate::*;
 
-pub(crate) const INITIAL_BUFFER_SIZE: u64 = 4096;
-
-
 const BIND_GROUP_LAYOUT_DESC: BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
     entries: &[
         BindGroupLayoutEntry {
@@ -121,17 +118,6 @@ impl AtlasPageSize {
     }
 }
 
-pub(crate) fn create_vertex_buffer(device: &Device, size: u64) -> Buffer {
-    device.create_buffer(&BufferDescriptor {
-        label: Some("shared vertex buffer"),
-        size,
-        usage: BufferUsages::VERTEX | BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    })
-}
-
-
-
 impl TextRenderer {
     /// Create a new TextRenderer with the specified parameters.
     pub(crate) fn new_with_params(
@@ -142,6 +128,7 @@ impl TextRenderer {
         atlas_size: u32,
         box_data: &GpuSlab<BoxGpu>,
         group_transforms: &GpuSlab<GroupTransform>,
+        glyph_quads: &GpuVec<GlyphQuad>,
     ) -> Self {
         let srgb = format.is_srgb();
 
@@ -240,8 +227,6 @@ impl TextRenderer {
             cache: None,
         });
 
-        let vertex_buffer = create_vertex_buffer(&device, INITIAL_BUFFER_SIZE);
-
         let (mask_texture_array, color_texture_array) = rebuild_texture_arrays(
             &device,
             &queue,
@@ -255,7 +240,7 @@ impl TextRenderer {
             &device,
             &mask_texture_array,
             &color_texture_array,
-            &vertex_buffer,
+            glyph_quads.buffer(),
             &sampler,
             &params_buffer,
             box_data,
@@ -274,7 +259,6 @@ impl TextRenderer {
             bind_group_layout,
             sampler,
             params_buffer,
-            vertex_buffer,
             srgb,
         };
     }

@@ -144,8 +144,10 @@ mod text_edit;
 pub use text_edit::*;
 
 mod gpu_slab;
-pub(crate) use gpu_slab::{GpuSlab, GpuSlabItem};
+pub(crate) use gpu_slab::*;
 
+mod gpu_vec;
+pub(crate) use gpu_vec::*;
 
 #[cfg(feature = "accessibility")]
 mod accessibility;

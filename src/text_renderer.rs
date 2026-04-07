@@ -1,7 +1,6 @@
 use crate::*;
 
 pub(crate) struct TextRenderer {
-    // wgpu handles (these are cheap to clone)
     pub(crate) device: Device,
     pub(crate) queue: Queue,
 
@@ -16,8 +15,6 @@ pub(crate) struct TextRenderer {
 
     pub(crate) pipeline: RenderPipeline,
     pub(crate) atlas_size: u32,
-
-    pub(crate) vertex_buffer: Buffer,
 
     pub(crate) srgb: bool,
 }
@@ -44,7 +41,7 @@ impl TextRenderer {
     pub fn render(&self, pass: &mut RenderPass, render_data: &RenderData) {
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
-        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        pass.set_vertex_buffer(0, render_data.glyph_quads.buffer().slice(..));
 
         // Calculate total instance count
         let total_instances = render_data.glyph_quads.len();
@@ -141,7 +138,7 @@ impl TextRenderer {
             &self.device,
             &self.mask_texture_array,
             &self.color_texture_array,
-            &self.vertex_buffer,
+            render_data.glyph_quads.buffer(),
             &self.sampler,
             &self.params_buffer,
             &render_data.box_data,

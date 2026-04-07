@@ -29,14 +29,13 @@ pub(crate) struct RenderData {
     pub(crate) mask_atlas_pages: Vec<AtlasPage<GrayImage>>,
     pub(crate) color_atlas_pages: Vec<AtlasPage<RgbaImage>>,
 
-    pub(crate) glyph_quads: Vec<GlyphQuad>,
+    pub(crate) glyph_quads: GpuVec<GlyphQuad>,
     pub(crate) box_data: GpuSlab<BoxGpu>,
     pub(crate) group_transforms: GpuSlab<GroupTransform>,
 
     pub(crate) params: Params,
     pub(crate) atlas_size: u32,
 
-    pub(crate) needs_glyph_sync: bool,
     pub(crate) needs_texture_array_rebuild: bool,
     pub(crate) needs_params_sync: bool,
 
@@ -384,7 +383,7 @@ impl RenderData {
             last_frame_evicted: 0,
             mask_atlas_pages,
             color_atlas_pages,
-            glyph_quads: Vec::with_capacity(1000),
+            glyph_quads: GpuVec::with_usage(device, 1000, "glyph quads buffer", wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST),
             box_data: GpuSlab::new(device, 30, "box data buffer"),
             group_transforms: {
                 let mut slab = GpuSlab::new(device, 16, "group transform buffer");
@@ -398,7 +397,6 @@ impl RenderData {
                 _pad: 0,
             },
             atlas_size,
-            needs_glyph_sync: true,
             needs_texture_array_rebuild: false,
             needs_params_sync: true,
             cursor_quad_index: None,
@@ -611,8 +609,6 @@ impl RenderData {
                 self.glyph_quads.push(cursor_rect);
             }
         }
-
-        self.needs_glyph_sync = true;
 
         if text_box.is_scroll_distance_above_tolerance() {
             text_box.render_data_info.cache_generation = 0;
