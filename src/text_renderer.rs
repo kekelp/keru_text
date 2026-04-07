@@ -138,7 +138,7 @@ impl TextRenderer {
             &self.device,
             &self.mask_texture_array,
             &self.color_texture_array,
-            render_data.glyph_quads.buffer(),
+            &render_data.glyph_quads,
             &self.sampler,
             &self.params_buffer,
             &render_data.box_data,

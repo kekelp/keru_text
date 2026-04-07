@@ -1,7 +1,7 @@
 use crate::*;
 
-const BIND_GROUP_LAYOUT_DESC: BindGroupLayoutDescriptor = wgpu::BindGroupLayoutDescriptor {
-    entries: &[
+fn bind_group_layout_entries() -> [BindGroupLayoutEntry; 7] {
+    [
         BindGroupLayoutEntry {
             binding: 0,
             // This is visible in vertex to get the size. Could be avoided, but I don't know if it's a big deal.
@@ -29,17 +29,7 @@ const BIND_GROUP_LAYOUT_DESC: BindGroupLayoutDescriptor = wgpu::BindGroupLayoutD
             ty: BindingType::Sampler(SamplerBindingType::Filtering),
             count: None,
         },
-        // Experimentally bind the vertex buffer as well
-        wgpu::BindGroupLayoutEntry {
-            binding: 3,
-            visibility: ShaderStages::VERTEX.union(ShaderStages::FRAGMENT),
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        },
+        GpuVec::<GlyphQuad>::bind_group_layout_entry(3),
         // Params uniform buffer
         BindGroupLayoutEntry {
             binding: 4,
@@ -73,9 +63,8 @@ const BIND_GROUP_LAYOUT_DESC: BindGroupLayoutDescriptor = wgpu::BindGroupLayoutD
             },
             count: None,
         }
-    ],
-    label: Some("bind group layout"),
-};
+    ]
+}
 
 /// Configuration parameters for the text renderer.
 pub struct TextRendererParams {
@@ -177,7 +166,11 @@ impl TextRenderer {
             mapped_at_creation: false,
         });
 
-        let bind_group_layout = device.create_bind_group_layout(&BIND_GROUP_LAYOUT_DESC);
+        let entries = bind_group_layout_entries();
+        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            entries: &entries,
+            label: Some("bind group layout"),
+        });
 
         // Create initial empty atlas pages for initial bind group creation
         let mut mask_atlas_pages = vec![AtlasPage {
@@ -240,7 +233,7 @@ impl TextRenderer {
             &device,
             &mask_texture_array,
             &color_texture_array,
-            glyph_quads.buffer(),
+            glyph_quads,
             &sampler,
             &params_buffer,
             box_data,
@@ -269,7 +262,7 @@ pub(crate) fn create_bind_group(
     device: &wgpu::Device,
     mask_texture_array: &wgpu::Texture,
     color_texture_array: &wgpu::Texture,
-    vertex_buffer: &wgpu::Buffer,
+    glyph_quads: &GpuVec<GlyphQuad>,
     sampler: &wgpu::Sampler,
     params_buffer: &wgpu::Buffer,
     box_data: &GpuSlab<BoxGpu>,
@@ -300,10 +293,7 @@ pub(crate) fn create_bind_group(
             binding: 2,
             resource: wgpu::BindingResource::Sampler(sampler),
         },
-        wgpu::BindGroupEntry {
-            binding: 3,
-            resource: vertex_buffer.as_entire_binding(),
-        },
+        glyph_quads.bind_group_entry(3),
         wgpu::BindGroupEntry {
             binding: 4,
             resource: params_buffer.as_entire_binding(),
