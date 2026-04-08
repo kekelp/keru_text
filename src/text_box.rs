@@ -634,30 +634,6 @@ impl TextBox {
 
                 if shift {
                     match &event.logical_key {
-                        Key::Named(NamedKey::ArrowLeft) => {
-                            if action_mod {
-                                self.selection.select_word_left(&self.layout);
-                            } else {
-                                self.selection.select_left(&self.layout);
-                            }
-                            consumed = true;
-                        }
-                        Key::Named(NamedKey::ArrowRight) => {
-                            if action_mod {
-                                self.selection.select_word_right(&self.layout);
-                            } else {
-                                self.selection.select_right(&self.layout);
-                            }
-                            consumed = true;
-                        }
-                        Key::Named(NamedKey::ArrowUp) => {
-                            self.selection.select_up(&self.layout);
-                            consumed = true;
-                        }
-                        Key::Named(NamedKey::ArrowDown) => {
-                            self.selection.select_down(&self.layout);
-                            consumed = true;
-                        }
                         Key::Named(NamedKey::Home) => {
                             if action_mod {
                                 self.selection.select_to_text_start(&self.layout);

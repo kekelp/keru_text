@@ -1,5 +1,4 @@
 use crate::*;
-use crate::text_box::SelectionExt;
 #[cfg(feature = "accessibility")]
 use accesskit::{NodeId, TreeUpdate};
 use slotmap::{SlotMap, DefaultKey};
@@ -10,7 +9,7 @@ use std::ptr::NonNull;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
-use winit::{event::{Modifiers, MouseButton, WindowEvent}, keyboard::Key, window::Window};
+use winit::{event::{KeyEvent, Modifiers, MouseButton, WindowEvent}, keyboard::{Key, NamedKey}, window::Window};
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use std::sync::{Arc, Weak};
 use winit::window::WindowId;
@@ -88,7 +87,11 @@ pub(crate) struct Shared {
 
     /// The anchor point for cross-box selection: (box_key, local_x, local_y).
     /// Set when clicking on a text box, used when shift-clicking across linked boxes.
-    pub cross_box_selection_anchor: Option<(DefaultKey, f32, f32)>,
+    pub cross_box_selection_anchor: Option<DefaultKey>,
+
+    /// The box that currently holds the keyboard selection cursor for cross-box keyboard selection.
+    /// None means cursor is in the focused/anchor box.
+    pub cross_box_cursor_key: Option<DefaultKey>,
 
     pub windows: Vec<WindowInfo>,
     pub layout_cx: LayoutContext<ColorBrush>,
@@ -346,6 +349,41 @@ impl TextInputState {
     }
 }
 
+fn apply_shift_nav_op(
+    selection: &mut parley::Selection,
+    layout: &parley::Layout<ColorBrush>,
+    event: &KeyEvent,
+    action_mod: bool,
+) -> Option<bool> {
+    match &event.logical_key {
+        Key::Named(NamedKey::ArrowLeft) => {
+            if action_mod { selection.select_word_left(layout); } else { selection.select_left(layout); }
+            Some(false)
+        }
+        Key::Named(NamedKey::ArrowRight) => {
+            if action_mod { selection.select_word_right(layout); } else { selection.select_right(layout); }
+            Some(true)
+        }
+        Key::Named(NamedKey::ArrowUp) => {
+            selection.select_up(layout);
+            Some(false)
+        }
+        Key::Named(NamedKey::ArrowDown) => {
+            selection.select_down(layout);
+            Some(true)
+        }
+        Key::Named(NamedKey::Home) => {
+            selection.select_to_line_start(layout);
+            Some(false)
+        }
+        Key::Named(NamedKey::End) => {
+            selection.select_to_line_end(layout);
+            Some(true)
+        }
+        _ => None,
+    }
+}
+
 
 impl Text {
     /// Create a new Text instance with a GPU renderer.
@@ -410,6 +448,7 @@ impl Text {
                 focused: None,
                 multi_box_selection: Vec::new(),
                 cross_box_selection_anchor: None,
+                cross_box_cursor_key: None,
                 layout_cx: LayoutContext::new(),
                 font_cx: FontContext::new(),
                 rerender_cursor: false,
@@ -1271,9 +1310,10 @@ impl Text {
                 self.remove_focus(old_focus);
             }
 
-            // Clear multi-box selection and cross-box anchor when focus changes
+            // Clear multi-box selection and cross-box state when focus changes
             self.shared.multi_box_selection.clear();
             self.shared.cross_box_selection_anchor = None;
+            self.shared.cross_box_cursor_key = None;
 
             // If the new focus is a TextBox, add it to multi_box_selection
             if let Some(AnyBox::TextBox(key)) = new_focus {
@@ -1382,6 +1422,29 @@ impl Text {
                     mods_state.control_key()
                 };
                 let shift = mods_state.shift_key();
+
+                if shift {
+                    match focused {
+                        AnyBox::TextBox(i) => {
+                            if self.handle_keyboard_selection(i, event, action_mod) {
+                                return true;
+                            }
+                        }
+                        AnyBox::TextEdit(i) => {
+                            let can_handle = self.text_edits.get(i).map_or(false, |te| {
+                                !te.text_box.hidden() && !te.disabled() && !te.showing_placeholder && !te.is_composing()
+                            });
+                            if can_handle {
+                                let te = self.text_edits.get_mut(i).unwrap();
+                                let tb = &mut te.text_box;
+                                if apply_shift_nav_op(&mut tb.selection, &tb.layout, event, action_mod).is_some() {
+                                    tb.shared_mut().rebuild_glyph_quad_buffer = true;
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
 
                 if action_mod && !shift {
                     if let Key::Character(c) = event.key_without_modifiers() {
@@ -1599,18 +1662,11 @@ impl Text {
                     self.shared.multi_box_selection.push(key);
                 }
 
-                let cursor_pos = self.input_state.mouse.cursor_pos;
-                let text_box = &self.text_boxes[key];
-                let inv_transform = text_box.transform().inverse().unwrap_or(Transform2D::identity());
-                let local_pos = inv_transform.transform_point(euclid::Point2D::new(cursor_pos.0 as f32, cursor_pos.1 as f32));
-                let local_cursor = (
-                    local_pos.x + text_box.scroll_offset.0,
-                    local_pos.y + text_box.scroll_offset.1,
-                );
-                self.shared.cross_box_selection_anchor = Some((key, local_cursor.0, local_cursor.1));
+                self.shared.cross_box_selection_anchor = Some(key);
             } else {
                 self.shared.cross_box_selection_anchor = None;
             }
+            self.shared.cross_box_cursor_key = None;
         }
 
         handled_shift_click
@@ -1619,7 +1675,7 @@ impl Text {
     /// Handle shift-click selection on TextBoxes.
     /// Uses the stored anchor to create selection spanning from anchor box to target box.
     fn handle_shift_click_selection(&mut self, target_key: DefaultKey) -> bool {
-        let Some((anchor_key, _anchor_x, _anchor_y)) = self.shared.cross_box_selection_anchor else {
+        let Some(anchor_key) = self.shared.cross_box_selection_anchor else {
             return false;
         };
 
@@ -1637,6 +1693,7 @@ impl Text {
             let tb = &mut self.text_boxes[target_key];
             let new_sel = tb.selection.shift_click_extension(&tb.layout, click_x, click_y);
             tb.selection = new_sel;
+            self.shared.cross_box_cursor_key = None;
             self.shared.rebuild_glyph_quad_buffer = true;
             return true;
         }
@@ -1713,8 +1770,118 @@ impl Text {
             }
         }
 
+        self.shared.cross_box_cursor_key = Some(target_key);
         self.shared.rebuild_glyph_quad_buffer = true;
         true
+    }
+
+    /// Returns true if the event was consumed.
+    fn handle_keyboard_selection(
+        &mut self,
+        focused_key: DefaultKey,
+        event: &KeyEvent,
+        action_mod: bool,
+    ) -> bool {
+        let cursor_key = self.shared.cross_box_cursor_key.unwrap_or(focused_key);
+        let sel_before = self.text_boxes[cursor_key].selection;
+
+        let is_forward = {
+            let tb = &mut self.text_boxes[cursor_key];
+            match apply_shift_nav_op(&mut tb.selection, &tb.layout, event, action_mod) {
+                Some(fwd) => fwd,
+                None => return false,
+            }
+        };
+
+        if self.text_boxes[cursor_key].selection != sel_before {
+            self.shared.rebuild_glyph_quad_buffer = true;
+            return true;
+        }
+
+        // Cursor didn't move — it's at the text boundary of cursor_key.
+
+        if cursor_key == focused_key {
+            // Try to extend into a linked box in the direction of the operation.
+            let next_key = if is_forward {
+                self.text_boxes[focused_key].next_box
+            } else {
+                self.text_boxes[focused_key].prev_box
+            };
+            if let Some(next_key) = next_key {
+                let entry = if is_forward { (0.0_f32, 0.0_f32) } else { (f32::MAX, f32::MAX) };
+                {
+                    let tb = &mut self.text_boxes[next_key];
+                    tb.selection.move_to_point(&tb.layout, entry.0, entry.1);
+                    apply_shift_nav_op(&mut tb.selection, &tb.layout, event, action_mod);
+                }
+                self.shared.cross_box_cursor_key = Some(next_key);
+                if !self.shared.multi_box_selection.contains(&next_key) {
+                    self.shared.multi_box_selection.push(next_key);
+                }
+                self.shared.rebuild_glyph_quad_buffer = true;
+            }
+            // else: at absolute chain boundary — event consumed but nothing to do.
+            return true;
+        }
+
+        // cursor_key != focused_key: in an extended box.
+        // Determine extension direction and whether this op retracts or extends further.
+        let is_forward_extension = self.is_cursor_forward_from_focused(focused_key, cursor_key);
+        let is_retracting = is_forward_extension != is_forward;
+
+        if is_retracting {
+            // Find the box toward focused before modifying state.
+            let prev_toward_focused = if is_forward_extension {
+                self.text_boxes[cursor_key].prev_box
+            } else {
+                self.text_boxes[cursor_key].next_box
+            };
+
+            // Clear cursor box and remove from multi-box selection.
+            self.text_boxes[cursor_key].selection = parley::Selection::default();
+            self.shared.multi_box_selection.retain(|&k| k != cursor_key);
+
+            let new_cursor = prev_toward_focused.unwrap_or(focused_key);
+            self.shared.cross_box_cursor_key = if new_cursor == focused_key { None } else { Some(new_cursor) };
+
+            // Apply op to new cursor box — its cursor was at the far boundary, step inward.
+            {
+                let tb = &mut self.text_boxes[new_cursor];
+                apply_shift_nav_op(&mut tb.selection, &tb.layout, event, action_mod);
+            }
+        } else {
+            // Extend further in the same direction.
+            let next_key = if is_forward {
+                self.text_boxes[cursor_key].next_box
+            } else {
+                self.text_boxes[cursor_key].prev_box
+            };
+            if let Some(next_key) = next_key {
+                let entry = if is_forward { (0.0_f32, 0.0_f32) } else { (f32::MAX, f32::MAX) };
+                {
+                    let tb = &mut self.text_boxes[next_key];
+                    tb.selection.move_to_point(&tb.layout, entry.0, entry.1);
+                    apply_shift_nav_op(&mut tb.selection, &tb.layout, event, action_mod);
+                }
+                self.shared.cross_box_cursor_key = Some(next_key);
+                if !self.shared.multi_box_selection.contains(&next_key) {
+                    self.shared.multi_box_selection.push(next_key);
+                }
+            }
+        }
+
+        self.shared.rebuild_glyph_quad_buffer = true;
+        true
+    }
+
+    /// Returns true if cursor_key is reachable by following next_box links from focused_key.
+    fn is_cursor_forward_from_focused(&self, focused_key: DefaultKey, cursor_key: DefaultKey) -> bool {
+        let mut cur = focused_key;
+        while let Some(next) = self.text_boxes.get(cur).and_then(|b| b.next_box) {
+            if next == cursor_key { return true; }
+            cur = next;
+        }
+        false
     }
 
     /// Set the disabled state of a text edit box.
