@@ -86,6 +86,10 @@ pub(crate) struct Shared {
     /// When non-empty, selection rects should be drawn for all boxes in this list.
     pub multi_box_selection: Vec<DefaultKey>,
 
+    /// The anchor point for cross-box selection: (box_key, local_x, local_y).
+    /// Set when clicking on a text box, used when shift-clicking across linked boxes.
+    pub cross_box_selection_anchor: Option<(DefaultKey, f32, f32)>,
+
     pub windows: Vec<WindowInfo>,
     pub layout_cx: LayoutContext<ColorBrush>,
     pub font_cx: FontContext,
@@ -405,6 +409,7 @@ impl Text {
                 scrolled: true,
                 focused: None,
                 multi_box_selection: Vec::new(),
+                cross_box_selection_anchor: None,
                 layout_cx: LayoutContext::new(),
                 font_cx: FontContext::new(),
                 rerender_cursor: false,
@@ -1057,13 +1062,14 @@ impl Text {
             }
         }
 
+        let mut handled_shift_click = false;
         if let WindowEvent::MouseInput { state, button, .. } = event {
             if state.is_pressed() && *button == MouseButton::Left {
                 let new_focus = self.find_topmost_selectable_at_pos_for_window(self.input_state.mouse.cursor_pos, window.id());
                 if new_focus.is_some() {
                     event_consumed = true;
                 }
-                self.refocus(new_focus);
+                handled_shift_click = self.handle_left_click(new_focus);
                 self.handle_click_counting();
             }
         }
@@ -1076,33 +1082,35 @@ impl Text {
             }
         }
 
-        if let Some(focused) = self.shared.focused {
-            // Only handle the event if the focused element belongs to this window
-            let focused_belongs_to_window = match focused {
-                AnyBox::TextEdit(i) => {
-                    if let Some(text_edit) = self.text_edits.get(i) {
-                        text_edit.text_box.window_id.is_none() || text_edit.text_box.window_id == Some(window.id())
-                    } else {
-                        false
-                    }
-                },
-                AnyBox::TextBox(i) => {
-                    if let Some(text_box) = self.text_boxes.get(i) {
-                        text_box.window_id.is_none() || text_box.window_id == Some(window.id())
-                    } else {
-                        false
-                    }
-                },
-            };
+        if !handled_shift_click {
+            if let Some(focused) = self.shared.focused {
+                // Only handle the event if the focused element belongs to this window
+                let focused_belongs_to_window = match focused {
+                    AnyBox::TextEdit(i) => {
+                        if let Some(text_edit) = self.text_edits.get(i) {
+                            text_edit.text_box.window_id.is_none() || text_edit.text_box.window_id == Some(window.id())
+                        } else {
+                            false
+                        }
+                    },
+                    AnyBox::TextBox(i) => {
+                        if let Some(text_box) = self.text_boxes.get(i) {
+                            text_box.window_id.is_none() || text_box.window_id == Some(window.id())
+                        } else {
+                            false
+                        }
+                    },
+                };
 
-            if focused_belongs_to_window {
-                let consumed = self.handle_focused_event(focused, event, window);
-                event_consumed |= consumed;
+                if focused_belongs_to_window {
+                    let consumed = self.handle_focused_event(focused, event, window);
+                    event_consumed |= consumed;
 
-                #[cfg(feature = "accessibility")] {   
-                    // todo: not the best, this includes decoration changes and stuff.
-                    if self.need_rerender() {
-                        self.push_ak_update_for_focused(focused);
+                    #[cfg(feature = "accessibility")] {
+                        // todo: not the best, this includes decoration changes and stuff.
+                        if self.need_rerender() {
+                            self.push_ak_update_for_focused(focused);
+                        }
                     }
                 }
             }
@@ -1206,11 +1214,10 @@ impl Text {
             }
         }
 
+        let mut handled_shift_click = false;
         if let WindowEvent::MouseInput { state, button, .. } = event {
             if state.is_pressed() && *button == MouseButton::Left {
-                if topmost_text_box.is_some() {
-                }
-                self.refocus(topmost_text_box);
+                handled_shift_click = self.handle_left_click(topmost_text_box);
                 self.handle_click_counting();
             }
         }
@@ -1221,8 +1228,10 @@ impl Text {
             }
         }
 
-        if let Some(focused) = self.shared.focused {
-            self.handle_focused_event(focused, event, window);
+        if !handled_shift_click {
+            if let Some(focused) = self.shared.focused {
+                self.handle_focused_event(focused, event, window);
+            }
         }
     }
 
@@ -1262,8 +1271,9 @@ impl Text {
                 self.remove_focus(old_focus);
             }
 
-            // Clear multi-box selection when focus changes
+            // Clear multi-box selection and cross-box anchor when focus changes
             self.shared.multi_box_selection.clear();
+            self.shared.cross_box_selection_anchor = None;
 
             // If the new focus is a TextBox, add it to multi_box_selection
             if let Some(AnyBox::TextBox(key)) = new_focus {
@@ -1469,6 +1479,7 @@ impl Text {
             },
         };
 
+        let focused_anchor_base = self.text_boxes[focused_key].selection.anchor_base();
         let mut current_key = focused_key;
         let mut did_extend = false;
 
@@ -1488,12 +1499,9 @@ impl Text {
                 SelectionDirection::Backward => self.text_boxes[current_key].prev_box,
             };
 
-            let copied_selection_anchor_base;
-
             // Extend current box's selection to the boundary
             {
                 let current_box = &mut self.text_boxes[current_key];
-                copied_selection_anchor_base = current_box.selection.anchor_base();
 
                 // For non-focused boxes (which were reset), set anchor at opposite boundary first
                 if current_key != focused_key {
@@ -1525,7 +1533,7 @@ impl Text {
                     local_pos.y + linked_box.scroll_offset.1,
                 );
 
-                match copied_selection_anchor_base {
+                match focused_anchor_base {
                     parley::AnchorBase::Word(_, _) => {
                         linked_box.selection.select_word_at_point(&linked_box.layout, anchor_point.0, anchor_point.1);
                     }
@@ -1561,6 +1569,146 @@ impl Text {
         }
 
         did_extend
+    }
+
+    fn handle_left_click(&mut self, new_focus: Option<AnyBox>) -> bool {
+        let shift = self.input_state.modifiers.state().shift_key();
+        let mut handled_shift_click = false;
+
+        if shift {
+            if let Some(AnyBox::TextBox(target_key)) = new_focus {
+                handled_shift_click = self.handle_shift_click_selection(target_key);
+            }
+        }
+
+        if ! handled_shift_click {
+            // Clear visual selections on all multi-box boxes before refocusing
+            if self.shared.multi_box_selection.len() > 1 {
+                for &k in &self.shared.multi_box_selection {
+                    self.text_boxes[k].selection = parley::Selection::default();
+                }
+                self.shared.rebuild_glyph_quad_buffer = true;
+            }
+            self.shared.multi_box_selection.clear();
+
+            self.refocus(new_focus);
+
+            // Set cross-box selection anchor for non-shift clicks on TextBox.
+            if let Some(AnyBox::TextBox(key)) = new_focus {
+                if self.shared.multi_box_selection.is_empty() {
+                    self.shared.multi_box_selection.push(key);
+                }
+
+                let cursor_pos = self.input_state.mouse.cursor_pos;
+                let text_box = &self.text_boxes[key];
+                let inv_transform = text_box.transform().inverse().unwrap_or(Transform2D::identity());
+                let local_pos = inv_transform.transform_point(euclid::Point2D::new(cursor_pos.0 as f32, cursor_pos.1 as f32));
+                let local_cursor = (
+                    local_pos.x + text_box.scroll_offset.0,
+                    local_pos.y + text_box.scroll_offset.1,
+                );
+                self.shared.cross_box_selection_anchor = Some((key, local_cursor.0, local_cursor.1));
+            } else {
+                self.shared.cross_box_selection_anchor = None;
+            }
+        }
+
+        handled_shift_click
+    }
+
+    /// Handle shift-click selection on TextBoxes.
+    /// Uses the stored anchor to create selection spanning from anchor box to target box.
+    fn handle_shift_click_selection(&mut self, target_key: DefaultKey) -> bool {
+        let Some((anchor_key, _anchor_x, _anchor_y)) = self.shared.cross_box_selection_anchor else {
+            return false;
+        };
+
+        // Get click position in target's local coords
+        let cursor = self.input_state.mouse.cursor_pos;
+        let (click_x, click_y) = {
+            let tb = &self.text_boxes[target_key];
+            let inv = tb.transform().inverse().unwrap_or(Transform2D::identity());
+            let p = inv.transform_point(euclid::Point2D::new(cursor.0 as f32, cursor.1 as f32));
+            (p.x + tb.scroll_offset.0, p.y + tb.scroll_offset.1)
+        };
+
+        // Same box: use shift_click_extension which preserves word/line granularity
+        if anchor_key == target_key {
+            let tb = &mut self.text_boxes[target_key];
+            let new_sel = tb.selection.shift_click_extension(&tb.layout, click_x, click_y);
+            tb.selection = new_sel;
+            self.shared.rebuild_glyph_quad_buffer = true;
+            return true;
+        }
+
+        // Build chain of linked boxes from anchor to target
+        let chain: Option<(Vec<DefaultKey>, bool)> = {
+            // Try forward
+            let mut fwd = vec![anchor_key];
+            let mut cur = anchor_key;
+            while let Some(next) = self.text_boxes.get(cur).and_then(|b| b.next_box) {
+                fwd.push(next);
+                if next == target_key { break; }
+                cur = next;
+            }
+            if fwd.last() == Some(&target_key) {
+                Some((fwd, true))
+            } else {
+                // Try backward
+                let mut bwd = vec![anchor_key];
+                cur = anchor_key;
+                while let Some(prev) = self.text_boxes.get(cur).and_then(|b| b.prev_box) {
+                    bwd.push(prev);
+                    if prev == target_key { break; }
+                    cur = prev;
+                }
+                if bwd.last() == Some(&target_key) {
+                    Some((bwd, false))
+                } else {
+                    None
+                }
+            }
+        };
+
+        let Some((chain, is_forward)) = chain else {
+            return false; // Not linked
+        };
+
+        // Clear old selections (except anchor box which we'll extend)
+        for &k in &self.shared.multi_box_selection {
+            if k != anchor_key {
+                self.text_boxes[k].selection = parley::Selection::default();
+            }
+        }
+        self.shared.multi_box_selection.clear();
+
+        // Boundary points
+        let boundary_end = if is_forward { (f32::MAX, f32::MAX) } else { (0.0_f32, 0.0_f32) };
+        let boundary_start = if is_forward { (0.0_f32, 0.0_f32) } else { (f32::MAX, f32::MAX) };
+
+        // Set selections for each box in chain
+        let n = chain.len();
+        for (i, &key) in chain.iter().enumerate() {
+            let tb = &mut self.text_boxes[key];
+
+            if i == 0 {
+                // Anchor box: extend existing selection to boundary (preserves word/line granularity)
+                tb.selection.extend_selection_to_point(&tb.layout, boundary_end.0, boundary_end.1);
+            } else if i == n - 1 {
+                // Target box: place cursor at boundary edge, extend to exact click point (no snapping)
+                tb.selection.move_to_point(&tb.layout, boundary_start.0, boundary_start.1);
+                tb.selection.extend_selection_to_point(&tb.layout, click_x, click_y);
+            } else {
+                // Middle box: select all (no snapping)
+                tb.selection.move_to_point(&tb.layout, boundary_start.0, boundary_start.1);
+                tb.selection.extend_selection_to_point(&tb.layout, boundary_end.0, boundary_end.1);
+            }
+
+            self.shared.multi_box_selection.push(key);
+        }
+
+        self.shared.rebuild_glyph_quad_buffer = true;
+        true
     }
 
     /// Set the disabled state of a text edit box.
@@ -1632,6 +1780,30 @@ impl Text {
     pub fn link_text_boxes(&mut self, first: &TextBoxHandle, second: &TextBoxHandle) {
         self.text_boxes[first.key].next_box = Some(second.key);
         self.text_boxes[second.key].prev_box = Some(first.key);
+    }
+
+    /// Remove all cross-box selection links involving this text box.
+    ///
+    /// Clears `prev_box` and `next_box` on this box, and also clears the
+    /// corresponding back-pointer on each former neighbor.
+    pub fn unlink_text_box(&mut self, handle: &TextBoxHandle) {
+        let (prev_key, next_key) = match self.text_boxes.get(handle.key) {
+            Some(tb) => (tb.prev_box, tb.next_box),
+            None => return,
+        };
+        if let Some(prev_key) = prev_key {
+            if let Some(prev_tb) = self.text_boxes.get_mut(prev_key) {
+                prev_tb.next_box = None;
+            }
+        }
+        if let Some(next_key) = next_key {
+            if let Some(next_tb) = self.text_boxes.get_mut(next_key) {
+                next_tb.prev_box = None;
+            }
+        }
+        let tb = &mut self.text_boxes[handle.key];
+        tb.prev_box = None;
+        tb.next_box = None;
     }
 
     /// Returns an iterator over selected text from all text boxes in the current multi-box selection.

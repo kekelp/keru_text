@@ -231,8 +231,9 @@ impl TextBox {
     pub(crate) fn is_cursor_past_end(&self, cursor_pos: (f64, f64)) -> bool {
         let local_pos = self.cursor_to_local(cursor_pos);
 
-        // Past the bottom of the box
-        if local_pos.y > self.height {
+        // Past the bottom of the box.
+        let effective_height = self.height.min(self.layout.height());
+        if local_pos.y > effective_height {
             return true;
         }
 
@@ -608,14 +609,11 @@ impl TextBox {
                             2 => self.selection.select_word_at_point(&self.layout, cursor_pos.0, cursor_pos.1),
                             3 => self.selection.select_line_at_point(&self.layout, cursor_pos.0, cursor_pos.1),
                             _ => {
-                                if shift {
-                                    self.set_selection(
-                                        self.selection.shift_click_extension(&self.layout, cursor_pos.0, cursor_pos.1)
-                                    )
-                                } else {
+                                if ! shift {
                                     self.selection.move_to_point(&self.layout, cursor_pos.0, cursor_pos.1);
                                     self.shared_mut().reset_cursor_blink();
                                 }
+                                // Shift clicking is handled globally because of multi-box selections.
                             }
                         }
                         consumed = true;
