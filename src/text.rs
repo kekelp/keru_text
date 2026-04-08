@@ -1641,38 +1641,29 @@ impl Text {
             return true;
         }
 
-        // Build chain of linked boxes from anchor to target
-        let chain: Option<(Vec<DefaultKey>, bool)> = {
-            // Try forward
-            let mut fwd = vec![anchor_key];
+        // Determine direction by checking reachability without allocating
+        let is_forward = {
             let mut cur = anchor_key;
+            let mut found = false;
             while let Some(next) = self.text_boxes.get(cur).and_then(|b| b.next_box) {
-                fwd.push(next);
-                if next == target_key { break; }
+                if next == target_key { found = true; break; }
                 cur = next;
             }
-            if fwd.last() == Some(&target_key) {
-                Some((fwd, true))
-            } else {
-                // Try backward
-                let mut bwd = vec![anchor_key];
-                cur = anchor_key;
-                while let Some(prev) = self.text_boxes.get(cur).and_then(|b| b.prev_box) {
-                    bwd.push(prev);
-                    if prev == target_key { break; }
-                    cur = prev;
-                }
-                if bwd.last() == Some(&target_key) {
-                    Some((bwd, false))
-                } else {
-                    None
-                }
-            }
+            found
         };
 
-        let Some((chain, is_forward)) = chain else {
-            return false; // Not linked
-        };
+        if !is_forward {
+            // Verify target is reachable backward
+            let mut cur = anchor_key;
+            let mut found = false;
+            while let Some(prev) = self.text_boxes.get(cur).and_then(|b| b.prev_box) {
+                if prev == target_key { found = true; break; }
+                cur = prev;
+            }
+            if !found {
+                return false; // Not linked
+            }
+        }
 
         // Clear old selections (except anchor box which we'll extend)
         for &k in &self.shared.multi_box_selection {
@@ -1686,25 +1677,40 @@ impl Text {
         let boundary_end = if is_forward { (f32::MAX, f32::MAX) } else { (0.0_f32, 0.0_f32) };
         let boundary_start = if is_forward { (0.0_f32, 0.0_f32) } else { (f32::MAX, f32::MAX) };
 
-        // Set selections for each box in chain
-        let n = chain.len();
-        for (i, &key) in chain.iter().enumerate() {
-            let tb = &mut self.text_boxes[key];
+        // Walk the chain and apply selections directly
+        let mut current = anchor_key;
+        loop {
+            let is_first = current == anchor_key;
+            let is_last = current == target_key;
 
-            if i == 0 {
-                // Anchor box: extend existing selection to boundary (preserves word/line granularity)
-                tb.selection.extend_selection_to_point(&tb.layout, boundary_end.0, boundary_end.1);
-            } else if i == n - 1 {
-                // Target box: place cursor at boundary edge, extend to exact click point (no snapping)
-                tb.selection.move_to_point(&tb.layout, boundary_start.0, boundary_start.1);
-                tb.selection.extend_selection_to_point(&tb.layout, click_x, click_y);
-            } else {
-                // Middle box: select all (no snapping)
-                tb.selection.move_to_point(&tb.layout, boundary_start.0, boundary_start.1);
-                tb.selection.extend_selection_to_point(&tb.layout, boundary_end.0, boundary_end.1);
+            {
+                let tb = &mut self.text_boxes[current];
+                if is_first {
+                    // Anchor box: extend existing selection to boundary
+                    tb.selection.extend_selection_to_point(&tb.layout, boundary_end.0, boundary_end.1);
+                } else if is_last {
+                    // Target box: place cursor at boundary edge, extend to exact click point (no snapping)
+                    tb.selection.move_to_point(&tb.layout, boundary_start.0, boundary_start.1);
+                    tb.selection.extend_selection_to_point(&tb.layout, click_x, click_y);
+                } else {
+                    // Middle box: select all
+                    tb.selection.move_to_point(&tb.layout, boundary_start.0, boundary_start.1);
+                    tb.selection.extend_selection_to_point(&tb.layout, boundary_end.0, boundary_end.1);
+                }
             }
+            self.shared.multi_box_selection.push(current);
 
-            self.shared.multi_box_selection.push(key);
+            if is_last { break; }
+
+            let next = if is_forward {
+                self.text_boxes[current].next_box
+            } else {
+                self.text_boxes[current].prev_box
+            };
+            match next {
+                Some(k) => current = k,
+                None => break,
+            }
         }
 
         self.shared.rebuild_glyph_quad_buffer = true;
