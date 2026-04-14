@@ -1589,8 +1589,7 @@ impl Text {
                 }
 
                 let linked_box = &mut self.text_boxes[linked_key];
-                let inv_transform = linked_box.transform().inverse().unwrap_or(Transform2D::identity());
-                let local_pos = inv_transform.transform_point(euclid::Point2D::new(cursor_pos.0 as f32, cursor_pos.1 as f32));
+                let local_pos = linked_box.cursor_to_local(cursor_pos);
                 let local_cursor = (
                     local_pos.x + linked_box.scroll_offset.0,
                     local_pos.y + linked_box.scroll_offset.1,
@@ -1683,8 +1682,7 @@ impl Text {
         let cursor = self.input_state.mouse.cursor_pos;
         let (click_x, click_y) = {
             let tb = &self.text_boxes[target_key];
-            let inv = tb.transform().inverse().unwrap_or(Transform2D::identity());
-            let p = inv.transform_point(euclid::Point2D::new(cursor.0 as f32, cursor.1 as f32));
+            let p = tb.cursor_to_local(cursor);
             (p.x + tb.scroll_offset.0, p.y + tb.scroll_offset.1)
         };
 

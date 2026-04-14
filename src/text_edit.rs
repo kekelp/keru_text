@@ -407,8 +407,7 @@ impl TextEdit {
                     match phase {
                         Started => {
                             // Transform touch position to text box local space
-                            let inv_transform = self.text_box.transform().inverse().unwrap_or(Transform2D::identity());
-                            let local_pos = inv_transform.transform_point(euclid::Point2D::new(location.x as f32, location.y as f32));
+                            let local_pos = self.text_box.cursor_to_local((location.x, location.y));
                             let cursor_pos = (
                                 local_pos.x as f64 + self.text_box.scroll_offset.0 as f64,
                                 local_pos.y as f64 + self.text_box.scroll_offset.1 as f64,
@@ -420,8 +419,7 @@ impl TextEdit {
                         }
                         Moved => {
                             // Transform touch position to text box local space
-                            let inv_transform = self.text_box.transform().inverse().unwrap_or(Transform2D::identity());
-                            let local_pos = inv_transform.transform_point(euclid::Point2D::new(location.x as f32, location.y as f32));
+                            let local_pos = self.text_box.cursor_to_local((location.x, location.y));
                             self.text_box.extend_selection_to_point(
                                 local_pos.x + self.text_box.scroll_offset.0,
                                 local_pos.y + self.text_box.scroll_offset.1,
