@@ -716,6 +716,7 @@ impl TextBox {
         self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.text_identity = None;
+        self.ranged_style_properties.clear();
 
         match &mut self.text {
             Cow::Owned(s) => {
@@ -742,6 +743,7 @@ impl TextBox {
         self.needs_relayout = true;
         self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
+        self.ranged_style_properties.clear();
 
         match &mut self.text {
             Cow::Owned(s) => {
@@ -770,6 +772,7 @@ impl TextBox {
         self.needs_relayout = true;
         self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
+        self.ranged_style_properties.clear();
 
         match &mut self.text {
             Cow::Owned(s) => {
@@ -788,6 +791,7 @@ impl TextBox {
         self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.text_identity = None;
+        self.ranged_style_properties.clear();
         self.text = Cow::Borrowed(text);
     }
 
@@ -805,6 +809,7 @@ impl TextBox {
         self.needs_relayout = true;
         self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
+        self.ranged_style_properties.clear();
         self.text = Cow::Borrowed(text);
     }
 
@@ -1027,8 +1032,10 @@ impl TextBox {
 
         let mut builder = layout_cx.ranged_builder(font_cx, &self.text, style, scale_factor as f32, true);
 
-        for (prop, range) in self.ranged_style_properties.clone() {
-            builder.push(prop, range);
+        for (prop, range) in &self.ranged_style_properties {
+            // properties are usually lightweight Copy types. Even font names should usually be the & 'static str variant of Cow.
+            let prop: StyleProperty<'static, ColorBrush> = prop.clone();
+            builder.push(prop, range.clone());
         }
 
         if let Some(color_override) = color_override {
@@ -1105,6 +1112,39 @@ impl TextBox {
         self.needs_relayout = true;
         self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
+    }
+
+    /// Adjusts ranged style properties after a text edit.
+    ///
+    /// `edit_start..edit_end` is the byte range that was deleted; `inserted_len` is the byte
+    /// length of the text inserted in its place. Ranges that collapse to zero length after the
+    /// adjustment are removed.
+    pub(crate) fn adjust_ranged_styles_for_edit(&mut self, edit_start: usize, edit_end: usize, inserted_len: usize) {
+        if self.ranged_style_properties.is_empty() {
+            return;
+        }
+        let delta: isize = inserted_len as isize - (edit_end - edit_start) as isize;
+        self.ranged_style_properties.retain_mut(|(_, range)| {
+            let new_start = if range.start < edit_start {
+                range.start
+            } else if range.start < edit_end {
+                // start was inside the deleted region: clamp to the edit point
+                edit_start
+            } else {
+                (range.start as isize + delta) as usize
+            };
+            let new_end = if range.end <= edit_start {
+                range.end
+            } else if range.end < edit_end {
+                // end was inside the deleted region: clamp to the edit point
+                edit_start
+            } else {
+                (range.end as isize + delta) as usize
+            };
+            range.start = new_start;
+            range.end = new_end;
+            new_start < new_end
+        });
     }
 
     // todo: scale factor was meant to be a different thing?

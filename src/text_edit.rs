@@ -503,6 +503,7 @@ impl TextEdit {
         self.history
             .record(&old_text, s, old_selection, new_range_start..new_range_end);
 
+        self.text_box.adjust_ranged_styles_for_edit(range.start, range.end, s.len());
         self.text_box.text_mut_string().replace_range(range, s);
         
         if self.single_line {
@@ -689,19 +690,23 @@ impl TextEdit {
         debug_assert!(cursor.map(|cursor| cursor.1 <= text.len()).unwrap_or(true));
 
         let start = if let Some(preedit_range) = &self.compose {
-            self.text_box.text_mut_string().replace_range(preedit_range.clone(), text);
-            preedit_range.start
+            let (ps, pe) = (preedit_range.start, preedit_range.end);
+            self.text_box.adjust_ranged_styles_for_edit(ps, pe, text.len());
+            self.text_box.text_mut_string().replace_range(ps..pe, text);
+            ps
         } else {
             let selection_start = self.text_box.selection().text_range().start;
             if self.text_box.selection().is_collapsed() {
+                self.text_box.adjust_ranged_styles_for_edit(selection_start, selection_start, text.len());
                 self.text_box.text_mut_string()
                     .insert_str(selection_start, text);
-                
+
                 if self.single_line {
                     self.remove_newlines();
                 }
             } else {
                 let range = self.text_box.selection().text_range();
+                self.text_box.adjust_ranged_styles_for_edit(range.start, range.end, text.len());
                 self.text_box.text_mut_string()
                     .replace_range(range, text);
             }
@@ -731,6 +736,7 @@ impl TextEdit {
     /// This removes the IME preedit text.
     pub(crate) fn clear_compose(&mut self) {
         if let Some(preedit_range) = self.compose.take() {
+            self.text_box.adjust_ranged_styles_for_edit(preedit_range.start, preedit_range.end, 0);
             self.text_box.text_mut_string().replace_range(preedit_range.clone(), "");
             self.text_box.shared_mut().cursor_blink_animation_currently_visible = true;
 
@@ -785,6 +791,8 @@ impl TextEdit {
                 clear_placeholder_partial_borrows!(self);
             }
 
+            // The two operations together are equivalent to replacing range_to_clear with text_to_restore.
+            self.text_box.adjust_ranged_styles_for_edit(op.range_to_clear.start, op.range_to_clear.end, op.text_to_restore.len());
             self
                 .text_box.text_mut_string()
                 .replace_range(op.range_to_clear.clone(), "");
@@ -810,6 +818,8 @@ impl TextEdit {
         }
 
         if let Some(op) = self.history.redo() {
+            // The two operations together are equivalent to replacing range_to_clear with text_to_restore.
+            self.text_box.adjust_ranged_styles_for_edit(op.range_to_clear.start, op.range_to_clear.end, op.text_to_restore.len());
             self
                 .text_box.text_mut_string()
                 .replace_range(op.range_to_clear.clone(), "");
@@ -840,14 +850,16 @@ impl TextEdit {
         let range = self.text_box.selection().text_range();
         let start = range.start;
         if self.text_box.selection().is_collapsed() {
+            self.text_box.adjust_ranged_styles_for_edit(start, start, s.len());
             self.text_box.text_mut_string().insert_str(start, s);
-            
+
             if self.single_line {
                 self.remove_newlines();
             }
         } else {
+            self.text_box.adjust_ranged_styles_for_edit(range.start, range.end, s.len());
             self.text_box.text_mut_string().replace_range(range, s);
-        
+
             if self.single_line {
                 self.remove_newlines();
             }
