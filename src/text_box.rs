@@ -88,6 +88,9 @@ pub struct TextBox {
     /// For cross-box selection: the previous text box in the sequence.
     /// When selecting before the start of this box, selection continues into the previous box.
     pub(crate) prev_box: Option<DefaultKey>,
+
+    /// Per-range style overrides applied on top of the base style during layout.
+    pub(crate) ranged_style_properties: Vec<(StyleProperty<'static, ColorBrush>, std::ops::Range<usize>)>,
 }
 
 /// Metadata and cache for the render data of a text box
@@ -197,6 +200,7 @@ impl TextBox {
             key: DefaultKey::null(), // Remember to fill it in later, I guess.
             next_box: None,
             prev_box: None,
+            ranged_style_properties: Vec::new(),
         }
     }
 
@@ -1020,19 +1024,19 @@ impl TextBox {
         
         let layout_cx = &mut shared.layout_cx;
         let font_cx = &mut shared.font_cx;
-        
-        let mut builder = layout_cx.tree_builder(font_cx, scale_factor as f32, true, style);
 
-        if let Some(color_override) = color_override {
-            builder.push_style_modification_span(&[
-                StyleProperty::Brush(color_override)
-            ]);
+        let mut builder = layout_cx.ranged_builder(font_cx, &self.text, style, scale_factor as f32, true);
+
+        for (prop, range) in self.ranged_style_properties.clone() {
+            builder.push(prop, range);
         }
 
-        builder.push_text(&self.text);
+        if let Some(color_override) = color_override {
+            let style = StyleProperty::Brush(color_override);
+            builder.push(style, 0..usize::MAX);
+        }
 
-        let (mut layout, _) = builder.build();
-
+        let mut layout = builder.build(&self.text);
         if ! single_line {
             layout.break_all_lines(Some(self.max_advance));
             layout.align(
@@ -1077,6 +1081,27 @@ impl TextBox {
             return;
         }
         self.alignment = alignment;
+        self.needs_relayout = true;
+        self.render_data_info.cache_generation = 0;
+        self.shared_mut().rebuild_glyph_quad_buffer = true;
+    }
+
+    /// Adds a [`StyleProperty`] override for the given byte range of the text.
+    ///
+    /// The property is applied each time the layout is rebuilt, on top of the base style.
+    /// Multiple overlapping ranges are applied in insertion order.
+    /// Call [`needs_relayout`](Self::needs_relayout) or otherwise trigger a relayout after
+    /// calling this to see the effect.
+    pub fn push_style_property(&mut self, prop: StyleProperty<'static, ColorBrush>, range: std::ops::Range<usize>) {
+        self.ranged_style_properties.push((prop, range));
+        self.needs_relayout = true;
+        self.render_data_info.cache_generation = 0;
+        self.shared_mut().rebuild_glyph_quad_buffer = true;
+    }
+
+    /// Clears all per-range style property overrides.
+    pub fn clear_style_properties(&mut self) {
+        self.ranged_style_properties.clear();
         self.needs_relayout = true;
         self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
