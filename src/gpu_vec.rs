@@ -1,6 +1,5 @@
 use std::mem::size_of;
 use std::ops::{Index, IndexMut};
-use wgpu::*;
 
 pub struct GpuVec<T: Copy> {
     pub(crate) data: Vec<T>,
@@ -12,10 +11,6 @@ pub struct GpuVec<T: Copy> {
 }
 
 impl<T: Copy> GpuVec<T> {
-    pub fn new(device: &wgpu::Device, capacity: usize, label: &str) -> Self {
-        Self::with_usage(device, capacity, label, BufferUsages::STORAGE | BufferUsages::COPY_DST)
-    }
-
     pub fn with_usage(device: &wgpu::Device, capacity: usize, label: &str, usage: wgpu::BufferUsages) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
@@ -103,21 +98,8 @@ impl<T: Copy> GpuVec<T> {
         self.dirty = true;
     }
 
-    pub fn vec(&mut self) -> &Vec<T> {
-        &self.data
-    }
-
-    pub fn vec_mut(&mut self) -> &mut Vec<T> {
-        self.dirty = true;
-        &mut self.data
-    }
-
     pub fn len(&self) -> usize {
         self.data.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.data.is_empty()
     }
 
     pub fn extend_from_slice(&mut self, slice: &[T]) {

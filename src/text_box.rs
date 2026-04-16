@@ -386,6 +386,18 @@ impl TextBox {
         }
     }
 
+    /// Returns the range of the currently selected text.
+    /// 
+    /// If the text in the text box changes, the result will become invalid, and might not even point
+    /// to a valid UTF-8 substring of the new text anymore.
+    pub fn selected_text_range(&self) -> Option<std::ops::Range<usize>> {
+        if !self.selection.is_collapsed() {
+            Some(self.selection.text_range())
+        } else {
+            None
+        }
+    }
+
     /// Returns the current selection of the text box.
     pub fn selection(&self) -> Selection {
         self.selection
@@ -1109,6 +1121,47 @@ impl TextBox {
     /// Clears all per-range style property overrides.
     pub fn clear_style_properties(&mut self) {
         self.ranged_style_properties.clear();
+        self.needs_relayout = true;
+        self.render_data_info.cache_generation = 0;
+        self.shared_mut().rebuild_glyph_quad_buffer = true;
+    }
+
+    /// Clears all style properties of a range.
+    pub fn clear_style_properties_in_range(&mut self, range_to_clear: std::ops::Range<usize>) {
+        let c_start = range_to_clear.start;
+        let c_end = range_to_clear.end;
+
+        // handle internal splits where the entry fully contains the clear range,
+        // and we need to split it it half. 
+        let original_len = self.ranged_style_properties.len();
+        for i in 0..original_len {
+            let tail_end = {
+                let (_, r) = &self.ranged_style_properties[i];
+                if r.start < c_start && r.end > c_end { Some(r.end) } else { None }
+            };
+            if let Some(end) = tail_end {
+                let prop = self.ranged_style_properties[i].0.clone();
+                self.ranged_style_properties[i].1.end = c_start;  // head: [start, c_start)
+                self.ranged_style_properties.push((prop, c_end..end));  // tail: [c_end, end)
+            }
+        }
+
+        // Remove fully-covered entries and trim the ones that intersect at one side.
+        // Entries already trimmed in pass 1 no longer intersect and pass through unchanged.
+        self.ranged_style_properties.retain_mut(|(_, r)| {
+            if r.end <= c_start || r.start >= c_end {
+                true  // no intersection
+            } else if r.start >= c_start && r.end <= c_end {
+                false  // fully covered: drop
+            } else if r.start < c_start {
+                r.end = c_start;  // left-side overlap: trim end
+                true
+            } else {
+                r.start = c_end;  // right-side overlap: trim start
+                true
+            }
+        });
+
         self.needs_relayout = true;
         self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;

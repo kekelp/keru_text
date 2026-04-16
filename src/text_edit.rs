@@ -1286,6 +1286,18 @@ impl TextEdit {
             self.text_box.selected_text()
         }
     }
+
+    /// Returns the range of the currently selected text.
+    /// 
+    /// If the text in the text box changes, the result will become invalid, and might not even point
+    /// to a valid UTF-8 substring of the new text anymore.
+    pub fn selected_text_range(&self) -> Option<std::ops::Range<usize>> {
+        if self.showing_placeholder {
+            None
+        } else {
+            self.text_box.selected_text_range()
+        }
+    }
     
     /// Returns the position of the text edit box.
     pub fn pos(&self) -> (f32, f32) {
@@ -1473,6 +1485,11 @@ impl TextEdit {
     /// See [`TextBox::clear_style_properties`] for details.
     pub fn clear_style_properties(&mut self) {
         self.text_box.clear_style_properties();
+    }
+
+    /// Clears style property in a range.
+    pub fn clear_style_properties_in_range(&mut self, range_to_clear: std::ops::Range<usize>) {
+        self.text_box.clear_style_properties_in_range(range_to_clear);
     }
 
     /// Returns the cursor geometry if visible.
