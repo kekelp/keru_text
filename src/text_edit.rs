@@ -1469,6 +1469,8 @@ impl TextEdit {
     }
     
     /// Sets the style for the text edit box.
+    ///
+    /// This function will only trigger a relayout if the new style is different from the old one.
     pub fn set_style(&mut self, style: &StyleHandle) {
         self.text_box.set_style(style);
     }

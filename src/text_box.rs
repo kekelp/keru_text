@@ -838,6 +838,8 @@ impl TextBox {
     }
 
     /// Sets the position of the text box.
+    ///
+    /// This function will only update the position if the new value is different from the current one.
     pub fn set_pos(&mut self, pos: (f64, f64)) {
         let new_translation = (pos.0 as f32, pos.1 as f32);
         if self.transform.translation == new_translation {
@@ -849,6 +851,8 @@ impl TextBox {
     }
 
     /// Sets the transform of the text box.
+    ///
+    /// This function will only update the transform if the new value is different from the current one.
     pub fn set_transform(&mut self, transform: Transform2D) {
         if self.transform.translation == transform.translation
             && self.transform.rotation == transform.rotation
@@ -867,6 +871,8 @@ impl TextBox {
     }
 
     /// Sets the text box to use a group transform in addition to its own one.
+    ///
+    /// This function will only update the group transform if the new handle is different from the current one.
     pub fn set_group_transform(&mut self, transform: GroupTransformHandle) {
         if self.group_transform_index == Some(transform) {
             return;
@@ -887,6 +893,8 @@ impl TextBox {
     }
 
     /// Sets the translation (position) of the text box.
+    ///
+    /// This function will only update the translation if the new value is different from the current one.
     pub fn set_translation(&mut self, x: f32, y: f32) {
         if self.transform.translation == (x, y) {
             return;
@@ -897,6 +905,8 @@ impl TextBox {
     }
 
     /// Sets the rotation of the text box in radians.
+    ///
+    /// This function will only update the rotation if the new value is different from the current one.
     pub fn set_rotation(&mut self, radians: f32) {
         if self.transform.rotation == radians {
             return;
@@ -907,6 +917,8 @@ impl TextBox {
     }
 
     /// Hides or unhides the text box.
+    ///
+    /// This function will only update the hidden state if the new value is different from the current one.
     pub(crate) fn set_hidden(&mut self, hidden: bool) {
         if self.hidden == hidden {
             return;
@@ -919,6 +931,8 @@ impl TextBox {
     }
 
     /// Sets the depth (z-order) of the text box.
+    ///
+    /// This function will only update the depth if the new value is different from the current one.
     pub fn set_depth(&mut self, depth: f32) {
         if self.depth == depth {
             return;
@@ -931,6 +945,8 @@ impl TextBox {
     /// Sets a screen-space clip rect.
     /// This is applied in screen space in the fragment shader,
     /// so it works correctly even when the text box is rotated.
+    ///
+    /// This function will only update the clip rect if the new value is different from the current one.
     pub fn set_clip_rect(&mut self, clip_rect: Option<parley::BoundingBox>) {
         if self.screen_space_clip_rect == clip_rect {
             return;
@@ -952,6 +968,8 @@ impl TextBox {
 
     /// Sets whether automatic clipping to the text box bounds is enabled.
     /// When enabled, text is clipped to the rectangle defined by scroll_offset and the box size.
+    ///
+    /// This function will only update the auto-clip setting if the new value is different from the current one.
     pub fn set_auto_clip(&mut self, auto_clip: bool) {
         if self.auto_clip == auto_clip {
             return;
@@ -975,6 +993,8 @@ impl TextBox {
 
 
     /// Sets the scroll offset for the text box.
+    ///
+    /// This function will only update the scroll offset if the new value is different from the current one.
     pub fn set_scroll_offset(&mut self, offset: (f32, f32)) {
         if self.scroll_offset == offset {
             return;
@@ -993,6 +1013,8 @@ impl TextBox {
     }
 
     /// Sets the style for the text box.
+    ///
+    /// This function will only trigger a relayout if the new style is different from the old one.
     pub fn set_style(&mut self, style: &StyleHandle) {
         if self.style.key == style.key {
             return;
@@ -1095,6 +1117,8 @@ impl TextBox {
     }
 
     /// Sets the text alignment.
+    ///
+    /// This function will only trigger a relayout if the new alignment is different from the old one.
     pub fn set_alignment(&mut self, alignment: Alignment) {
         if self.alignment == alignment {
             return;
@@ -1202,6 +1226,8 @@ impl TextBox {
 
     // todo: scale factor was meant to be a different thing?
     /// Sets the scale factor for the text.
+    ///
+    /// This function will only trigger a relayout if the new scale is different from the old one.
     pub fn set_scale(&mut self, scale: f32) {
         if self.transform.scale == scale {
             return;
