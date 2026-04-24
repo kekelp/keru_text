@@ -72,7 +72,7 @@ impl State {
             Ctrl + N: Clear all properties and return to normal \n\
         ";
         let info_box = text.add_text_box(info, (50.0, 300.0), (500.0, 250.0), 0.0);
-        text.get_text_box_mut(&info_box).push_style_property(SMALL, 0..info.len());
+        text.get_text_box_mut(&info_box).push_ranged_style_property(SMALL, 0..info.len());
 
         Self { device, queue, surface, surface_config, window, text, edit_handle, modifiers }
     }

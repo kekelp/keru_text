@@ -1135,7 +1135,7 @@ impl TextBox {
     /// Multiple overlapping ranges are applied in insertion order.
     /// Call [`needs_relayout`](Self::needs_relayout) or otherwise trigger a relayout after
     /// calling this to see the effect.
-    pub fn push_style_property(&mut self, prop: StyleProperty<'static, ColorBrush>, range: std::ops::Range<usize>) {
+    pub fn push_ranged_style_property(&mut self, prop: StyleProperty<'static, ColorBrush>, range: std::ops::Range<usize>) {
         self.ranged_style_properties.push((prop, range));
         self.needs_relayout = true;
         self.render_data_info.cache_generation = 0;
@@ -1143,7 +1143,7 @@ impl TextBox {
     }
 
     /// Clears all per-range style property overrides.
-    pub fn clear_style_properties(&mut self) {
+    pub fn clear_ranged_style_properties(&mut self) {
         self.ranged_style_properties.clear();
         self.needs_relayout = true;
         self.render_data_info.cache_generation = 0;
