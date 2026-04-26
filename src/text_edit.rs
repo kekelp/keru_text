@@ -1531,7 +1531,10 @@ impl TextEdit {
         if self.text_box.needs_relayout() {
             if self.style_version_changed() {
                 self.text_box.style_version = self.style_version();
+                // Style changed externally, invalidate cached quads
+                self.text_box.render_data_info.cache_generation = 0;
             }
+            self.text_box.shared_mut().rebuild_glyph_quad_buffer = true;
             self.text_box.rebuild_layout(color_override, self.single_line);
         }
     }
