@@ -1482,6 +1482,20 @@ impl TextEdit {
         self.text_box.push_ranged_style_property(prop, range);
     }
 
+    /// Sets the whole-box [`StyleProperty`] overrides, replacing any previously set overrides.
+    ///
+    /// This method won't cause a relayout unless the new properties are different than the previous ones.
+    pub fn set_style_property_overrides(&mut self, props: &[StyleProperty<'static, ColorBrush>]) {
+        self.text_box.set_style_property_overrides(props);
+    }
+
+    /// Sets the text alignment.
+    ///
+    /// This function will only trigger a relayout if the new alignment is different from the old one.
+    pub fn set_alignment(&mut self, alignment: Alignment) {
+        self.text_box.set_alignment(alignment);
+    }
+
     /// Clears all per-range style property overrides.
     ///
     /// See [`TextBox::clear_style_properties`] for details.
@@ -1514,7 +1528,7 @@ impl TextEdit {
             None
         };
 
-        if self.text_box.needs_relayout || self.style_version_changed() {
+        if self.text_box.needs_relayout() {
             if self.style_version_changed() {
                 self.text_box.style_version = self.style_version();
             }

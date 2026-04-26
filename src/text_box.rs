@@ -91,6 +91,7 @@ pub struct TextBox {
 
     /// Per-range style overrides applied on top of the base style during layout.
     pub(crate) ranged_style_properties: Vec<(StyleProperty<'static, ColorBrush>, std::ops::Range<usize>)>,
+    pub(crate) style_property_overrides: Vec<StyleProperty<'static, ColorBrush>>,
 }
 
 /// Metadata and cache for the render data of a text box
@@ -179,7 +180,7 @@ impl TextBox {
             selection: Selection::default(),
             style: StyleHandle { key: default_style_key },
             width: size.0,
-            alignment: Default::default(),
+            alignment: Alignment::Center,
             screen_space_clip_rect: None,
             auto_clip: false,
             scroll_offset: (0.0, 0.0),
@@ -200,7 +201,8 @@ impl TextBox {
             key: DefaultKey::null(), // Remember to fill it in later, I guess.
             next_box: None,
             prev_box: None,
-            ranged_style_properties: Vec::new(),
+            ranged_style_properties: Vec::with_capacity(3),
+            style_property_overrides: Vec::with_capacity(3),
         }
     }
 
@@ -1066,6 +1068,10 @@ impl TextBox {
 
         let mut builder = layout_cx.ranged_builder(font_cx, &self.text, style, scale_factor as f32, true);
 
+        for prop in &self.style_property_overrides {
+            builder.push(prop.clone(), 0..usize::MAX);
+        }
+
         for (prop, range) in &self.ranged_style_properties {
             // properties are usually lightweight Copy types. Even font names should usually be the & 'static str variant of Cow.
             let prop: StyleProperty<'static, ColorBrush> = prop.clone();
@@ -1129,6 +1135,13 @@ impl TextBox {
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
+    /// Sets the text alignment.
+    ///
+    /// This function will only trigger a relayout if the new alignment is different from the old one.
+    pub fn alignment(&self) -> Alignment {
+        self.alignment
+    }
+
     /// Adds a [`StyleProperty`] override for the given byte range of the text.
     ///
     /// The property is applied each time the layout is rebuilt, on top of the base style.
@@ -1137,6 +1150,19 @@ impl TextBox {
     /// calling this to see the effect.
     pub fn push_ranged_style_property(&mut self, prop: StyleProperty<'static, ColorBrush>, range: std::ops::Range<usize>) {
         self.ranged_style_properties.push((prop, range));
+        self.needs_relayout = true;
+        self.render_data_info.cache_generation = 0;
+        self.shared_mut().rebuild_glyph_quad_buffer = true;
+    }
+
+    /// Sets the whole-box [`StyleProperty`] overrides, replacing any previously set overrides.
+    ///
+    /// This method won't cause a relayout unless the new properties are different than the previous ones.
+    pub fn set_style_property_overrides(&mut self, properties: &[StyleProperty<'static, ColorBrush>]) {
+        if self.style_property_overrides.as_slice() == properties {
+            return;
+        }
+        self.style_property_overrides = properties.to_vec();
         self.needs_relayout = true;
         self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
@@ -1433,7 +1459,7 @@ impl TextBox {
     // todo better comment.
     /// Refresh the layout.
     pub fn refresh_layout(&mut self) {
-        if self.needs_relayout || self.style_version_changed() {
+        if self.needs_relayout() {
             if self.style_version_changed() {
                 self.style_version = self.style_version();
                 // Style changed externally, invalidate cached quads
@@ -1442,6 +1468,13 @@ impl TextBox {
             self.shared_mut().rebuild_glyph_quad_buffer = true;
             self.rebuild_layout(None, false);
         }
+    }
+
+    /// Returns `true` if the text box layout will have to be recomputed because of changes to the text content, size, alignment, font size, etc.
+    /// 
+    /// The layout will automatically be recomputed when preparing the text for render, or when calling [TextBox::layout()].
+    pub fn needs_relayout(&mut self) -> bool {
+        return self.needs_relayout || self.style_version_changed();
     }
 
     /// Sets whether the text is selectable.
