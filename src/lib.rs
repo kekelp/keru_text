@@ -156,7 +156,7 @@ pub use accessibility::*;
 
 pub use parley::TextStyle as ParleyTextStyle;
 
-/// Text style.
+/// A shareable text style.
 /// 
 /// To use it, first add a `TextStyle2` into a [`Text`] with [`Text::add_style()`], and get a [`StyleHandle`] back. Then, use [`TextBoxMut::set_style()`] to make a text box use the style.
 pub type TextStyle2 = ParleyTextStyle<'static, 'static, ColorBrush>;
