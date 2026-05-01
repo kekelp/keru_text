@@ -402,6 +402,7 @@ impl RenderData {
             cursor_quad_index: None,
             glyph_cache_generation: 1, // Start at 1 so that default QuadStorage (generation 0) is invalid
             scale_cx: Some(ScaleContext::new()),
+            #[cfg(debug_assertions)]
             stats: RenderStats::default(),
         }
     }
