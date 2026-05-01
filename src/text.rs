@@ -956,20 +956,14 @@ impl Text {
             let current_frame = self.current_visibility_frame;
             for (_key, text_edit) in self.text_edits.iter_mut() {
                 if !text_edit.text_box.hidden() && text_edit.text_box.last_frame_touched == current_frame {
-                    let should_render = text_edit.text_box.window_id.is_none() || text_edit.text_box.window_id == Some(window_id);
-                    if should_render {
-                        self.shared.render_data.prepare_text_edit_layout(text_edit);
-                    }
+                    self.shared.render_data.prepare_text_edit_layout(text_edit);
                 }
             }
 
             for (key, mut text_box) in self.text_boxes.iter_mut() {
                 if !text_box.hidden() && text_box.last_frame_touched == current_frame {
-                    let should_render = text_box.window_id.is_none() || text_box.window_id == Some(window_id);
-                    if should_render {
-                        let show_selection = self.shared.multi_box_selection.contains(&key);
-                        self.shared.render_data.prepare_text_box_layout(&mut text_box, false, show_selection);
-                    }
+                    let show_selection = self.shared.multi_box_selection.contains(&key);
+                    self.shared.render_data.prepare_text_box_layout(&mut text_box, false, show_selection);
                 }
             }
         }
