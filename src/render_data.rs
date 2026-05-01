@@ -505,6 +505,7 @@ impl RenderData {
     /// Prepare a text edit layout for rendering with scrolling and clipping support.
     pub fn prepare_text_edit_layout(&mut self, text_edit: &mut TextEdit) {
         if text_edit.hidden() {
+            text_edit.text_box.render_data_info.glyph_quad_range = Some((0, 0));
             return;
         }
 
@@ -525,6 +526,7 @@ impl RenderData {
 
     pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, show_cursor: bool, show_selection: bool) {
         if text_box.hidden() {
+            text_box.render_data_info.glyph_quad_range = Some((0, 0));
             return;
         }
         text_box.refresh_layout();

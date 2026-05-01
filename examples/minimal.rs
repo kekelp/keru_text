@@ -27,7 +27,7 @@ impl State {
         surface.configure(&device, &surface_config);
 
         let mut text = Text::new(&device, &queue, surface_config.format);
-        let text_edit_handle = text.add_text_edit("SNEED".to_string(), (50.0, 50.0), (400.0, 200.0), 0.0);
+        let text_edit_handle = text.add_text_edit("".to_string(), (50.0, 50.0), (400.0, 200.0), 0.0);
 
         text.get_text_edit_mut(&text_edit_handle).set_placeholder_static("Type here...");
 

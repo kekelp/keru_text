@@ -1047,8 +1047,7 @@ impl Text {
         self.input_state.handle_event(event);
 
         // Register the window if not already there.
-        // Only for a few events that should be  guaranteed to arrive for new windows, to avoid a lot of needless checks
-        if let WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } = event {
+        if let WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } | WindowEvent::RedrawRequested = event {
             if self.shared.windows.iter().find(|w_info| w_info.window_id == window.id()).is_none() {
                 self.shared.windows.push(WindowInfo { 
                     window_id: window.id(), 

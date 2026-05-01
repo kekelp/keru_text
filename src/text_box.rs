@@ -424,7 +424,9 @@ impl TextBox {
     /// 
     /// Must be called after [`Text::prepare_all()`].
     pub fn glyph_quad_range(&self) -> (usize, usize) {
-        debug_assert!(self.render_data_info.glyph_quad_range.is_some(), "Quad range called before this text box was prepared.");
+        if self.render_data_info.glyph_quad_range.is_none() {
+            eprintln!("Quad range called before this text box was prepared.");
+        }
         return self.render_data_info.glyph_quad_range.unwrap_or_else(|| (0,0));
     }
 }
