@@ -3,7 +3,6 @@ use winit::{event::{ElementState, WindowEvent}, event_loop::EventLoop, keyboard:
 use wgpu::*;
 use keru_text::*;
 use keru_text::parley::TextStyle;
-use wgpu_profiler::{GpuProfiler, GpuProfilerSettings};
 use std::fmt::Write;
 
 fn main() {
@@ -25,7 +24,6 @@ struct State {
     char_count: TextBoxHandle,
     help_text: TextBoxHandle,
     edit_boxes: Vec<TextEditHandle>,
-    gpu_profiler: GpuProfiler,
     frame_count: u32,
     last_print_time: Instant,
     total_prepare_time: Duration,
@@ -177,12 +175,6 @@ impl State {
             edit_boxes.push(handle);
         }
 
-        let gpu_profiler = GpuProfiler::new(&device, GpuProfilerSettings {
-            enable_timer_queries: true,
-            enable_debug_groups: true,
-            max_num_pending_frames: 3,
-        }).unwrap();
-
         Self {
             device,
             queue,
@@ -196,7 +188,6 @@ impl State {
             frame_counter,
             char_count,
             help_text,
-            gpu_profiler,
             frame_count: 0,
             last_print_time: Instant::now(),
             total_prepare_time: Duration::ZERO,
@@ -367,8 +358,6 @@ impl winit::application::ApplicationHandler for Application {
                 let surface_texture = state.surface.get_current_texture().unwrap();
                 let mut encoder = state.device.create_command_encoder(&CommandEncoderDescriptor::default());
 
-                let query = state.gpu_profiler.begin_query("Render", &mut encoder);
-
                 {
                     let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
                         color_attachments: &[Some(RenderPassColorAttachment {
@@ -385,28 +374,7 @@ impl winit::application::ApplicationHandler for Application {
                 #[cfg(debug_assertions)]
                 println!("{:?} {:?}", Instant::now(), state.text.render_stats());
 
-                state.gpu_profiler.end_query(&mut encoder, query);
-                state.gpu_profiler.resolve_queries(&mut encoder);
-
                 state.queue.submit(Some(encoder.finish()));
-
-                state.gpu_profiler.end_frame().unwrap();
-
-                if let Some(profiling_data) = state.gpu_profiler.process_finished_frame(state.queue.get_timestamp_period()) {
-                    for p in profiling_data {
-                        if p.label == "Render" {
-                            if let Some(time) = p.time {
-                                let dur = Duration::from_secs_f64(time.end - time.start);
-                                state.total_gpu_time += dur;
-
-                                // get the first GPU time that becomes available
-                                if state.first_gpu_time.is_none() {
-                                    state.first_gpu_time = Some(dur);
-                                }
-                            }
-                        }
-                    }
-                }
 
                 surface_texture.present();
 
