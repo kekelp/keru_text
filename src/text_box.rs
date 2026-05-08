@@ -1107,7 +1107,8 @@ impl TextBox {
 
     /// Sets the size of the text box.
     pub fn set_size(&mut self, size: (f32, f32)) {
-        let relayout = (self.width != size.0) || (self.height != size.1) || (self.max_advance != size.0);
+        let tolerance = 0.5;
+        let relayout = (self.width - size.0).abs() > tolerance || (self.height - size.1).abs() > tolerance || (self.max_advance - size.0).abs() > tolerance;
         self.width = size.0;
         self.height = size.1;
         self.max_advance = size.0;
