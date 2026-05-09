@@ -64,6 +64,7 @@ pub struct TextBox {
     pub(crate) selectable: bool,
 
     pub(crate) hidden: bool,
+    pub(crate) offscreen: bool,
     pub(crate) last_frame_touched: u64,
     pub(crate) can_hide: bool,
     
@@ -185,6 +186,7 @@ impl TextBox {
             auto_clip: false,
             scroll_offset: (0.0, 0.0),
             hidden: false,
+            offscreen: false,
             last_frame_touched: 0,
             can_hide: false,
             window_id: None,
@@ -846,12 +848,26 @@ impl TextBox {
     /// This function will only update the position if the new value is different from the current one.
     pub fn set_pos(&mut self, pos: (f64, f64)) {
         let new_translation = (pos.0 as f32, pos.1 as f32);
-        if self.transform.translation == new_translation {
+        if (self.transform.translation.0 - new_translation.0).abs() < 0.5
+            && (self.transform.translation.1 - new_translation.1).abs() < 0.5
+        {
             return;
         }
         self.transform.translation = new_translation;
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).translation = [pos.0 as f32, pos.1 as f32];
+
+        let (w, h) = self.shared().windows.first()
+            .map(|win| win.dimensions)
+            .unwrap_or((1920.0, 1080.0));
+        let offscreen = pos.0 < -(5.0 * w as f64) || pos.0 > 6.0 * w as f64
+            || pos.1 < -(5.0 * h as f64) || pos.1 > 6.0 * h as f64;
+        if offscreen != self.offscreen {
+            self.offscreen = offscreen;
+            // Only rebuild when transitioning in/out of culled state.
+            // Normal moves are handled by the per-box GPU transform for free.
+            self.shared_mut().rebuild_glyph_quad_buffer = true;
+        }
     }
 
     /// Sets the transform of the text box.
