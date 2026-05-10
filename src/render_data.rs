@@ -17,6 +17,15 @@ pub struct RenderStats {
 
     /// Total bytes written to GPU (buffers + textures).
     pub gpu_bytes: u64,
+
+    /// Number of text boxes that were fully relaid out this frame.
+    pub relayouts: u32,
+
+    /// Number of text boxes prepared (not hidden/offscreen) this frame.
+    pub boxes_prepared: u32,
+
+    /// Number of text boxes skipped (hidden or offscreen) this frame.
+    pub boxes_skipped: u32,
 }
 
 pub(crate) struct RenderData {
@@ -505,8 +514,14 @@ impl RenderData {
     /// Prepare a text edit layout for rendering with scrolling and clipping support.
     pub fn prepare_text_edit_layout(&mut self, text_edit: &mut TextEdit) {
         if text_edit.hidden() || text_edit.text_box.offscreen {
+            #[cfg(debug_assertions)] {
+                self.stats.boxes_skipped += 1;
+            }
             text_edit.text_box.render_data_info.glyph_quad_range = Some((0, 0));
             return;
+        }
+        #[cfg(debug_assertions)] {
+            self.stats.boxes_prepared += 1;
         }
 
         // Update scroll to ensure cursor is visible before rendering
@@ -518,18 +533,33 @@ impl RenderData {
             text_edit.needs_scroll_update = false;
         }
 
+        let needs_relayout = text_edit.text_box.needs_relayout();
         text_edit.refresh_layout();
+        #[cfg(debug_assertions)]
+        if needs_relayout { self.stats.relayouts += 1; }
 
         let focused = text_edit.text_box.shared().focused == Some(AnyBox::TextEdit(text_edit.text_box.key));
         self.prepare_text_box_layout(&mut text_edit.text_box, focused, focused);
     }
 
     pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, show_cursor: bool, show_selection: bool) {
+        let w = self.params.screen_resolution_width;
+        let h = self.params.screen_resolution_height;
+        let t = text_box.transform.translation;
+        text_box.offscreen = t.0 < -(5.0 * w) || t.0 > 6.0 * w || t.1 < -(5.0 * h) || t.1 > 6.0 * h;
+
         if text_box.hidden() || text_box.offscreen {
+            #[cfg(debug_assertions)]
+            { self.stats.boxes_skipped += 1; }
             text_box.render_data_info.glyph_quad_range = Some((0, 0));
             return;
         }
+        #[cfg(debug_assertions)]
+        { self.stats.boxes_prepared += 1; }
+        let needs_relayout = text_box.needs_relayout();
         text_box.refresh_layout();
+        #[cfg(debug_assertions)]
+        if needs_relayout { self.stats.relayouts += 1; }
 
         let start_index = self.glyph_quads.len();
 
