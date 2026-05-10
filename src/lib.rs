@@ -149,6 +149,11 @@ pub(crate) use gpu_slab::*;
 mod gpu_vec;
 pub(crate) use gpu_vec::*;
 
+mod offset_allocator_heap;
+
+mod gpu_heap;
+pub(crate) use gpu_heap::*;
+
 #[cfg(feature = "accessibility")]
 mod accessibility;
 #[cfg(feature = "accessibility")]
