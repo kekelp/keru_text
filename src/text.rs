@@ -116,6 +116,8 @@ pub(crate) struct Shared {
     pub cursor_blink_waker: Option<CursorBlinkWaker>,
 
     pub window: Option<Weak<Window>>,
+
+    pub(crate) scratch_quads: Vec<GlyphQuad>,
 }
 
 impl Shared {
@@ -468,6 +470,7 @@ impl Text {
                 cursor_blink_animation_currently_visible: false,
                 cursor_blink_waker: None,
                 window: None,
+                scratch_quads: Vec::new(),
             }),
         }
     }
@@ -526,7 +529,7 @@ impl Text {
                 } else {
                     0x00_00_00_00
                 };
-                glyph_quads.data[cursor_index].color = color;
+                glyph_quads.heap.as_slice_mut()[cursor_index].color = color;
             }
         }
 
@@ -543,9 +546,9 @@ impl Text {
         } else if self.shared.rerender_cursor {
             // Do a small sync for just the blinking cursor
             if let Some(cursor_index) = self.shared.render_data.cursor_quad_index {
-                let bytes: &[u8] = bytemuck::cast_slice(std::slice::from_ref(&glyph_quads.data[cursor_index]));
+                let bytes: &[u8] = bytemuck::cast_slice(std::slice::from_ref(&glyph_quads.heap.as_slice()[cursor_index]));
                 let offset = (cursor_index * std::mem::size_of::<GlyphQuad>()) as u64;
-                self.renderer.queue.write_buffer(&glyph_quads.buffer, offset, bytes);
+                self.renderer.queue.write_buffer(glyph_quads.buffer(), offset, bytes);
             }
         }
         self.shared.rerender_cursor = false;
@@ -956,14 +959,18 @@ impl Text {
             let current_frame = self.current_visibility_frame;
             for (_key, text_edit) in self.text_edits.iter_mut() {
                 if !text_edit.text_box.hidden() && text_edit.text_box.last_frame_touched == current_frame {
-                    self.shared.render_data.prepare_text_edit_layout(text_edit);
+                    self.shared.render_data.prepare_text_edit_layout(text_edit, &mut self.shared.scratch_quads);
+                } else {
+                    self.shared.render_data.release_glyph_quads(&mut text_edit.text_box.render_data_info);
                 }
             }
 
             for (key, mut text_box) in self.text_boxes.iter_mut() {
                 if !text_box.hidden() && text_box.last_frame_touched == current_frame {
                     let show_selection = self.shared.multi_box_selection.contains(&key);
-                    self.shared.render_data.prepare_text_box_layout(&mut text_box, false, show_selection);
+                    self.shared.render_data.prepare_text_box_layout(&mut text_box, false, show_selection, &mut self.shared.scratch_quads);
+                } else {
+                    self.shared.render_data.release_glyph_quads(&mut text_box.render_data_info);
                 }
             }
         }

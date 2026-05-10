@@ -1,5 +1,7 @@
 use offset_allocator::{Allocation, Allocator};
 
+pub const CHUNK_SIZE: u32 = 2048;
+
 /// A handle to a live allocation in the heap.
 ///
 /// The element index of this allocation within the backing `Vec` is
@@ -29,8 +31,6 @@ pub struct OffsetHeap<T> {
 }
 
 impl<T: Default + Clone> OffsetHeap<T> {
-    pub const CHUNK_SIZE: u32 = 2048;
-
     pub fn new() -> Self {
         Self {
             vec: Vec::new(),
@@ -53,13 +53,13 @@ impl<T: Default + Clone> OffsetHeap<T> {
         }
 
         // No existing chunk could fit it; add a new one.
-        if size > Self::CHUNK_SIZE {
+        if size > CHUNK_SIZE {
             return None;
         }
 
         let chunk_index = self.chunks.len() as u32;
-        self.vec.resize_with(self.vec.len() + Self::CHUNK_SIZE as usize, T::default);
-        let mut new_chunk = Allocator::new(Self::CHUNK_SIZE);
+        self.vec.resize_with(self.vec.len() + CHUNK_SIZE as usize, T::default);
+        let mut new_chunk = Allocator::new(CHUNK_SIZE);
         let allocation = new_chunk.allocate(size).unwrap();
         self.chunks.push(new_chunk);
 
@@ -75,17 +75,21 @@ impl<T: Default + Clone> OffsetHeap<T> {
 
     /// Returns a slice of `size` elements for a live allocation.
     pub fn get(&self, handle: Handle, size: usize) -> &[T] {
-        let start = handle.vec_index(Self::CHUNK_SIZE);
+        let start = handle.vec_index(CHUNK_SIZE);
         &self.vec[start..start + size]
     }
 
     /// Returns a mutable slice of `size` elements for a live allocation.
     pub fn get_mut(&mut self, handle: Handle, size: usize) -> &mut [T] {
-        let start = handle.vec_index(Self::CHUNK_SIZE);
+        let start = handle.vec_index(CHUNK_SIZE);
         &mut self.vec[start..start + size]
     }
 
     pub fn as_slice(&self) -> &[T] {
         &self.vec
+    }
+
+    pub fn as_slice_mut(&mut self) -> &mut [T] {
+        &mut self.vec
     }
 }

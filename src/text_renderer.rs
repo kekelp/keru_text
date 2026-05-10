@@ -43,7 +43,6 @@ impl TextRenderer {
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, render_data.glyph_quads.buffer().slice(..));
 
-        // Calculate total instance count
         let total_instances = render_data.glyph_quads.len();
 
         if total_instances > 0 {

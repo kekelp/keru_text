@@ -38,7 +38,7 @@ pub(crate) struct RenderData {
     pub(crate) mask_atlas_pages: Vec<AtlasPage<GrayImage>>,
     pub(crate) color_atlas_pages: Vec<AtlasPage<RgbaImage>>,
 
-    pub(crate) glyph_quads: GpuVec<GlyphQuad>,
+    pub(crate) glyph_quads: GpuHeap<GlyphQuad>,
     pub(crate) box_data: GpuSlab<BoxGpu>,
     pub(crate) group_transforms: GpuSlab<GroupTransform>,
 
@@ -50,10 +50,6 @@ pub(crate) struct RenderData {
 
     /// Index of the cursor quad in glyph_quads, if any. Used for cursor-blink-only updates.
     pub(crate) cursor_quad_index: Option<usize>,
-
-    /// Generation counter for cache invalidation. Incremented when glyphs are evicted.
-    /// QuadStorage compares its cache_generation against this to check validity.
-    pub(crate) glyph_cache_generation: u64,
 
     pub(crate) scale_cx: Option<ScaleContext>,
 
@@ -159,7 +155,7 @@ impl GpuSlabItem for BoxGpu {
 /// The struct corresponding to the gpu-side representation of a text glyph.
 #[allow(missing_docs)]
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Zeroable, Pod)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct GlyphQuad {
     pub pos_packed: u32,                  // 4 bytes - pack x,y as u16,u16
     pub dim_packed: u32,                  // 4 bytes - pack width,height as u16,u16
@@ -392,7 +388,7 @@ impl RenderData {
             last_frame_evicted: 0,
             mask_atlas_pages,
             color_atlas_pages,
-            glyph_quads: GpuVec::with_usage(device, 1000, "glyph quads buffer", wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST),
+            glyph_quads: GpuHeap::with_usage(device, 1000, "glyph quads buffer", wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST),
             box_data: GpuSlab::new(device, 30, "box data buffer"),
             group_transforms: {
                 let mut slab = GpuSlab::new(device, 16, "group transform buffer");
@@ -409,7 +405,6 @@ impl RenderData {
             needs_texture_array_rebuild: false,
             needs_params_sync: true,
             cursor_quad_index: None,
-            glyph_cache_generation: 1, // Start at 1 so that default QuadStorage (generation 0) is invalid
             scale_cx: Some(ScaleContext::new()),
             #[cfg(debug_assertions)]
             stats: RenderStats::default(),
@@ -429,7 +424,6 @@ impl RenderData {
     // separating them would mean that they can't share the same cache and it would make things more complex
     fn evict_old_glyphs(&mut self) {
         self.last_frame_evicted = self.frame;
-        let mut evicted_any = false;
 
         while let Some((_key, value)) = self.glyph_cache.peek_lru() {
 
@@ -447,12 +441,8 @@ impl RenderData {
             }
 
             self.glyph_cache.pop_lru();
-            evicted_any = true;
         }
 
-        if evicted_any {
-            self.glyph_cache_generation += 1;
-        }
     }
 
     fn needs_evicting(&self, current_frame: u64) -> bool {
@@ -477,11 +467,21 @@ impl RenderData {
         });
     }
 
-    /// Clear all render data for text and decorations from the renderer.
+    /// Advance the frame counter and reset per-frame state.
     pub fn clear(&mut self) {
         self.frame += 1;
-        self.glyph_quads.clear();
         self.cursor_quad_index = None;
+    }
+
+    /// Zero out and free a text box's glyph quad heap allocation.
+    pub(crate) fn release_glyph_quads(&mut self, info: &mut RenderDataInfo) {
+        if let Some(handle) = info.glyph_quad_handle.take() {
+            let count = info.glyph_quad_count as usize;
+            self.glyph_quads.heap.get_mut(handle, count).fill(GlyphQuad::zeroed());
+            self.glyph_quads.heap.free(handle);
+            self.glyph_quads.dirty = true;
+            info.glyph_quad_count = 0;
+        }
     }
 
     /// Get the render stats from the last frame. Only available in debug builds.
@@ -512,12 +512,12 @@ impl RenderData {
     }
 
     /// Prepare a text edit layout for rendering with scrolling and clipping support.
-    pub fn prepare_text_edit_layout(&mut self, text_edit: &mut TextEdit) {
+    pub fn prepare_text_edit_layout(&mut self, text_edit: &mut TextEdit, scratch: &mut Vec<GlyphQuad>) {
         if text_edit.hidden() || text_edit.text_box.offscreen {
             #[cfg(debug_assertions)] {
                 self.stats.boxes_skipped += 1;
             }
-            text_edit.text_box.render_data_info.glyph_quad_range = Some((0, 0));
+            self.release_glyph_quads(&mut text_edit.text_box.render_data_info);
             return;
         }
         #[cfg(debug_assertions)] {
@@ -539,10 +539,10 @@ impl RenderData {
         if needs_relayout { self.stats.relayouts += 1; }
 
         let focused = text_edit.text_box.shared().focused == Some(AnyBox::TextEdit(text_edit.text_box.key));
-        self.prepare_text_box_layout(&mut text_edit.text_box, focused, focused);
+        self.prepare_text_box_layout(&mut text_edit.text_box, focused, focused, scratch);
     }
 
-    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, show_cursor: bool, show_selection: bool) {
+    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, show_cursor: bool, show_selection: bool, scratch: &mut Vec<GlyphQuad>) {
         let w = self.params.screen_resolution_width;
         let h = self.params.screen_resolution_height;
         let t = text_box.transform.translation;
@@ -551,7 +551,7 @@ impl RenderData {
         if text_box.hidden() || text_box.offscreen {
             #[cfg(debug_assertions)]
             { self.stats.boxes_skipped += 1; }
-            text_box.render_data_info.glyph_quad_range = Some((0, 0));
+            self.release_glyph_quads(&mut text_box.render_data_info);
             return;
         }
         #[cfg(debug_assertions)]
@@ -560,8 +560,6 @@ impl RenderData {
         text_box.refresh_layout();
         #[cfg(debug_assertions)]
         if needs_relayout { self.stats.relayouts += 1; }
-
-        let start_index = self.glyph_quads.len();
 
         let clip_rect = text_box.effective_clip_rect();
         let screen_clip = text_box.screen_space_clip_rect;
@@ -579,80 +577,79 @@ impl RenderData {
             group_transform_index
         );
 
-        // Rebuild cached quads if invalid (generation mismatch means either text changed or glyphs were evicted)
-        if text_box.render_data_info.cache_generation != self.glyph_cache_generation {
-            text_box.render_data_info.cached_glyph_quads.clear();
+        // Build all quads into the scratch buffer, then write to the heap.
+        let quads = scratch;
+        quads.clear();
 
-            // Line culling: clip_rect is already in layout-local coordinates (includes scroll)
-            let (clip_top, clip_bottom) = if let Some(clip) = clip_rect {
-                (clip.y0 as f32, clip.y1 as f32)
-            } else {
-                (0.0, self.params.screen_resolution_height)
-            };
+        // Line culling: clip_rect is already in layout-local coordinates (includes scroll)
+        let (clip_top, clip_bottom) = if let Some(clip) = clip_rect {
+            (clip.y0 as f32, clip.y1 as f32)
+        } else {
+            (0.0, self.params.screen_resolution_height)
+        };
 
-            for line in text_box.layout.lines() {
-                let metrics = line.metrics();
-                let line_y = metrics.baseline;
+        for line in text_box.layout.lines() {
+            let metrics = line.metrics();
+            let line_y = metrics.baseline;
 
-                // Cull lines with tolerance to allow for scroll optimization
-                let line_top = line_y - metrics.ascent;
-                let line_bottom = line_y + metrics.descent;
+            let line_top = line_y - metrics.ascent;
+            let line_bottom = line_y + metrics.descent;
 
-                if line_bottom < clip_top - SCROLL_TOLERANCE || line_top > clip_bottom + SCROLL_TOLERANCE {
-                    continue;
-                }
-
-                for item in line.items() {
-                    match item {
-                        PositionedLayoutItem::GlyphRun(glyph_run) => {
-                            self.prepare_glyph_run_into(&glyph_run, box_index as u32, &mut text_box.render_data_info.cached_glyph_quads);
-                        }
-                        PositionedLayoutItem::InlineBox(_inline_box) => {}
-                    }
-                }
+            if line_bottom < clip_top - SCROLL_TOLERANCE || line_top > clip_bottom + SCROLL_TOLERANCE {
+                continue;
             }
 
-            text_box.render_data_info.base_scroll = scroll_offset;
-            text_box.render_data_info.last_scroll = scroll_offset;
-
-            text_box.render_data_info.cache_generation = self.glyph_cache_generation;
+            for item in line.items() {
+                match item {
+                    PositionedLayoutItem::GlyphRun(glyph_run) => {
+                        self.prepare_glyph_run_into(&glyph_run, box_index as u32, &mut *quads);
+                    }
+                    PositionedLayoutItem::InlineBox(_inline_box) => {}
+                }
+            }
         }
 
-        // Copy cached quads to main buffer
-        self.glyph_quads.extend_from_slice(&text_box.render_data_info.cached_glyph_quads);
+        text_box.render_data_info.base_scroll = scroll_offset;
+        text_box.render_data_info.last_scroll = scroll_offset;
 
-        // Selection rects are extremely fast to rebuild, so we don't bother to cache them and track them.
         if show_selection {
             let selection_color = 0x33_33_ff_aa;
             text_box.selection().geometry_with(&text_box.layout, |rect, _line_i| {
-                let rect = self.make_selection_rect(rect, selection_color, box_index as u32);
-                if let Some(rect) = rect {
-                    self.glyph_quads.push(rect);
+                if let Some(q) = self.make_selection_rect(rect, selection_color, box_index as u32) {
+                    quads.push(q);
                 }
             });
         }
 
         let show_cursor = show_cursor && text_box.selection().is_collapsed();
-        if show_cursor {
-            let size = CURSOR_WIDTH;
-            let cursor_rect = text_box.selection().focus().geometry(&text_box.layout, size);
-            let cursor_rect = self.make_selection_rect(cursor_rect, CURSOR_COLOR, box_index as u32);
-            if let Some(cursor_rect) = cursor_rect {
-                self.cursor_quad_index = Some(self.glyph_quads.len());
-                self.glyph_quads.push(cursor_rect);
+        let cursor_pos_in_quads: Option<usize> = if show_cursor {
+            let cursor_rect = text_box.selection().focus().geometry(&text_box.layout, CURSOR_WIDTH);
+            if let Some(q) = self.make_selection_rect(cursor_rect, CURSOR_COLOR, box_index as u32) {
+                let pos = quads.len();
+                quads.push(q);
+                Some(pos)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Free old allocation and replace with the new quads.
+        self.release_glyph_quads(&mut text_box.render_data_info);
+
+        if !quads.is_empty() {
+            if let Some(handle) = self.glyph_quads.heap.allocate(quads.len() as u32) {
+                let base_index = handle.vec_index(CHUNK_SIZE);
+                self.glyph_quads.heap.get_mut(handle, quads.len()).copy_from_slice(&quads);
+                self.glyph_quads.dirty = true;
+                text_box.render_data_info.glyph_quad_handle = Some(handle);
+                text_box.render_data_info.glyph_quad_count = quads.len() as u32;
+                self.cursor_quad_index = cursor_pos_in_quads.map(|p| base_index + p);
             }
         }
-
-        if text_box.is_scroll_distance_above_tolerance() {
-            text_box.render_data_info.cache_generation = 0;
-        }
-
-        let end_index = self.glyph_quads.len();
-        text_box.render_data_info.glyph_quad_range = Some((start_index, end_index));
     }
 
-    /// Prepare a glyph run and push quads to a target Vec.
-    /// Used for caching quads per text box.
     fn prepare_glyph_run_into(
         &mut self,
         glyph_run: &GlyphRun<'_, ColorBrush>,

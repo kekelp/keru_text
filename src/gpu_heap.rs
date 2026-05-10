@@ -107,4 +107,8 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
     pub fn buffer(&self) -> &wgpu::Buffer {
         &self.buffer
     }
+
+    pub fn len(&self) -> usize {
+        self.heap.as_slice().len()
+    }
 }

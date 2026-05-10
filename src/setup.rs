@@ -29,7 +29,7 @@ fn bind_group_layout_entries() -> [BindGroupLayoutEntry; 7] {
             ty: BindingType::Sampler(SamplerBindingType::Filtering),
             count: None,
         },
-        GpuVec::<GlyphQuad>::bind_group_layout_entry(3),
+        GpuHeap::<GlyphQuad>::bind_group_layout_entry(3),
         // Params uniform buffer
         BindGroupLayoutEntry {
             binding: 4,
@@ -117,7 +117,7 @@ impl TextRenderer {
         atlas_size: u32,
         box_data: &GpuSlab<BoxGpu>,
         group_transforms: &GpuSlab<GroupTransform>,
-        glyph_quads: &GpuVec<GlyphQuad>,
+        glyph_quads: &GpuHeap<GlyphQuad>,
     ) -> Self {
         let srgb = format.is_srgb();
 
@@ -262,7 +262,7 @@ pub(crate) fn create_bind_group(
     device: &wgpu::Device,
     mask_texture_array: &wgpu::Texture,
     color_texture_array: &wgpu::Texture,
-    glyph_quads: &GpuVec<GlyphQuad>,
+    glyph_quads: &GpuHeap<GlyphQuad>,
     sampler: &wgpu::Sampler,
     params_buffer: &wgpu::Buffer,
     box_data: &GpuSlab<BoxGpu>,

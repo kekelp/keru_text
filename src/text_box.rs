@@ -95,22 +95,19 @@ pub struct TextBox {
     pub(crate) style_property_overrides: Vec<StyleProperty<'static, ColorBrush>>,
 }
 
-/// Metadata and cache for the render data of a text box
-#[derive(Debug, Clone)]
+/// Metadata for the render data of a text box
+#[derive(Clone)]
 pub(crate) struct RenderDataInfo {
-    /// Range into the text renderer quads. If None, it doesn't mean that there are no quads, but rather that the text box was never prepared.
-    pub glyph_quad_range: Option<(usize, usize)>,
     /// Index into the text renderer's box_data array for this text box
     pub box_index: usize,
     /// The scroll offset when quads were prepared (for tolerance check)
     pub base_scroll: (f32, f32),
     /// The scroll offset currently reflected in BoxGpu translation (for incremental delta)
     pub last_scroll: (f32, f32),
-    /// These quads are still quite slow to create, even if the glyph bitmaps are all in the cache. Probably because the parley datastructures are complicated and slow to traverse (I think I remember seeing it spend a lot of time in ".flat_map(|cluster| cluster.glyphs()))") or because of the cache lookups.
-    pub cached_glyph_quads: Vec<GlyphQuad>,
-    /// Cache generation when quads were cached. Compared against RenderData.cache_generation
-    /// to check validity. Set to 0 to invalidate (text change), global generation increments on glyph eviction.
-    pub cache_generation: u64,
+    /// Handle into the glyph quad heap for this box's current allocation.
+    pub glyph_quad_handle: Option<Handle>,
+    /// Number of quads in the current heap allocation.
+    pub glyph_quad_count: u32,
 }
 
 
@@ -191,12 +188,11 @@ impl TextBox {
             can_hide: false,
             window_id: None,
             render_data_info: RenderDataInfo {
-                glyph_quad_range: None,
                 box_index: 0,
                 base_scroll: (0.0, 0.0),
                 last_scroll: (0.0, 0.0),
-                cached_glyph_quads: Vec::with_capacity(10),
-                cache_generation: 0,
+                glyph_quad_handle: None,
+                glyph_quad_count: 0,
             },
             explicit_hitbox: None,
             shared_backref,
@@ -423,13 +419,16 @@ impl TextBox {
     }
 
     /// Returns the range of the glyph quads in the gpu render buffer.
-    /// 
+    ///
     /// Must be called after [`Text::prepare_all()`].
     pub fn glyph_quad_range(&self) -> (usize, usize) {
-        if self.render_data_info.glyph_quad_range.is_none() {
-            eprintln!("Quad range called before this text box was prepared.");
+        match self.render_data_info.glyph_quad_handle {
+            Some(handle) => {
+                let start = handle.vec_index(CHUNK_SIZE);
+                (start, start + self.render_data_info.glyph_quad_count as usize)
+            }
+            None => (0, 0),
         }
-        return self.render_data_info.glyph_quad_range.unwrap_or_else(|| (0,0));
     }
 }
 
@@ -711,7 +710,6 @@ impl TextBox {
     /// After this method is called, the [`TextBox`] will assume that its text has changed. If you have to call this method many times with the same text every time, as when building a declarative or immediate mode interface, consider using a method like [`Self::set_text_hashed()`].
     pub fn text_mut(&mut self) -> &mut Cow<'static, str> {
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.text_identity = None;
         &mut self.text
@@ -731,7 +729,6 @@ impl TextBox {
     /// After this method is called, the [`TextBox`] will assume that its text has changed. If you have to call this method many times with the same text every time, as when building a declarative or immediate mode interface, consider using a method like [`Self::set_text_hashed()`].
     pub fn set_text(&mut self, new_text: &str) {
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.text_identity = None;
         self.ranged_style_properties.clear();
@@ -759,7 +756,6 @@ impl TextBox {
         }
         self.text_identity = Some(new_identity);
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.ranged_style_properties.clear();
 
@@ -788,7 +784,6 @@ impl TextBox {
         }
         self.text_identity = Some(new_identity);
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.ranged_style_properties.clear();
 
@@ -806,7 +801,6 @@ impl TextBox {
     /// Sets the text to a static string reference.
     pub fn set_static_text(&mut self, text: &'static str) {
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.text_identity = None;
         self.ranged_style_properties.clear();
@@ -825,7 +819,6 @@ impl TextBox {
         }
         self.text_identity = Some(new_identity);
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.ranged_style_properties.clear();
         self.text = Cow::Borrowed(text);
@@ -1042,7 +1035,6 @@ impl TextBox {
         self.style = style.sneak_clone();
         self.style_version = self.style_version();
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
@@ -1130,7 +1122,6 @@ impl TextBox {
         self.max_advance = size.0;
         if relayout {
             self.needs_relayout = true;
-            self.render_data_info.cache_generation = 0;
         }
     }
 
@@ -1150,7 +1141,6 @@ impl TextBox {
         }
         self.alignment = alignment;
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
@@ -1170,7 +1160,6 @@ impl TextBox {
     pub fn push_ranged_style_property(&mut self, prop: StyleProperty<'static, ColorBrush>, range: std::ops::Range<usize>) {
         self.ranged_style_properties.push((prop, range));
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
@@ -1183,7 +1172,6 @@ impl TextBox {
         }
         self.style_property_overrides = properties.to_vec();
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
@@ -1191,7 +1179,6 @@ impl TextBox {
     pub fn clear_ranged_style_properties(&mut self) {
         self.ranged_style_properties.clear();
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
@@ -1232,7 +1219,6 @@ impl TextBox {
         });
 
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
@@ -1279,7 +1265,6 @@ impl TextBox {
         }
         self.transform.scale = scale;
         self.needs_relayout = true;
-        self.render_data_info.cache_generation = 0;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
@@ -1482,7 +1467,6 @@ impl TextBox {
             if self.style_version_changed() {
                 self.style_version = self.style_version();
                 // Style changed externally, invalidate cached quads
-                self.render_data_info.cache_generation = 0;
             }
             self.shared_mut().rebuild_glyph_quad_buffer = true;
             self.rebuild_layout(None, false);
