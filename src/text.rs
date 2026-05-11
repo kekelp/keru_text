@@ -202,7 +202,7 @@ pub(crate) struct Shared {
     pub layout_cx: LayoutContext<ColorBrush>,
     pub font_cx: FontContext,
 
-    pub rerender_cursor: bool,
+    pub decorations_dirty: bool,
 
     // Throttle paste to once per frame to avoid layout rebuild spam.
     pub pasted_this_frame: bool,
@@ -238,7 +238,7 @@ impl Shared {
             self.cursor_blink_animation_currently_visible = blinked_out;
 
             if changed {
-                self.rerender_cursor = true;
+                self.decorations_dirty = true;
             }
         }
     }
@@ -248,7 +248,7 @@ impl Shared {
             // todo: reorganize some stuff and also check that the selection is collapsed?
             self.cursor_blink_start = Some(Instant::now());
             self.cursor_blink_animation_currently_visible = true;
-            self.rerender_cursor = true;
+            self.decorations_dirty = true;
 
             if let Some(timer) = &self.cursor_blink_waker {
                 timer.start();
@@ -557,7 +557,7 @@ impl Text {
                 cross_box_cursor_key: None,
                 layout_cx: LayoutContext::new(),
                 font_cx: FontContext::new(),
-                rerender_cursor: false,
+                decorations_dirty: false,
                 pasted_this_frame: false,
                 #[cfg(feature = "accessibility")]
                 accesskit_focus_tracker: FocusChange::new(),
@@ -636,7 +636,7 @@ impl Text {
                 needs_bind_group_recreate = true;
             }
         }
-        self.shared.rerender_cursor = false;
+        self.shared.decorations_dirty = false;
 
         if needs_bind_group_recreate {
             self.renderer.recreate_bind_group(&self.shared.render_data);
@@ -1083,6 +1083,9 @@ impl Text {
             }
         }
 
+        if self.shared.rebuild_glyph_quad_buffer {
+            self.shared.decorations_dirty = true;
+        }
         self.prepare_decoration_quads();
 
         // Multi-window: mark prepared and check if all windows done.
@@ -1109,8 +1112,13 @@ impl Text {
     }
 
     fn prepare_decoration_quads(&mut self) {
+        if !self.shared.decorations_dirty {
+            return;
+        }
+        self.shared.decorations_dirty = false;
+
         // Decoration quads: selection rects and cursor, done once for all boxes.
-        
+
         self.shared.render_data.release_decoration_quads();
 
         let scratch = &mut self.shared.scratch_quads;
@@ -1180,7 +1188,7 @@ impl Text {
                 self.shared.cursor_blink_animation_currently_visible = false;
                 // Should rerender to hide the selection rectangles
                 self.shared.stop_cursor_blink();
-                self.shared.rerender_cursor = true;
+                self.shared.decorations_dirty = true;
             }
         }
 
@@ -1479,7 +1487,7 @@ impl Text {
                     let handle = TextEditHandle { key: i };
                     let did_scroll = self.handle_text_edit_scroll_event(&handle, event, window);
                     if did_scroll {
-                        self.shared.rerender_cursor = true;
+                        self.shared.decorations_dirty = true;
                         self.shared.scrolled = true;
                     }
                     return did_scroll;
@@ -1982,7 +1990,7 @@ impl Text {
     /// 
     /// Games and applications that rerender continuously can call `Window::request_redraw()` unconditionally after every `RedrawRequested` event, without checking this method.
     pub fn needs_rerender(&mut self) -> bool {
-        return self.shared.rebuild_glyph_quad_buffer || self.shared.rerender_cursor || self.shared.scrolled;
+        return self.shared.rebuild_glyph_quad_buffer || self.shared.decorations_dirty || self.shared.scrolled;
     }
 
     /// Get a mutable reference to a text box wrapped with its style.
