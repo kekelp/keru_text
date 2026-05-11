@@ -1046,6 +1046,9 @@ impl Text {
             self.shared.render_data.stats = RenderStats::default();
         }
 
+        // this apparently avoids some sort of cache miss where the contains() keeps loading the empty vec for no reason.
+        let styles_changed = ! self.shared.changed_style_keys.is_empty(); 
+
         self.shared.pasted_this_frame = false;
         self.shared.render_data.update_resolution(window_size.0, window_size.1);
 
@@ -1059,7 +1062,7 @@ impl Text {
         // Each box decides internally whether to do a full rebuild or a fast BoxGpu-only update.
         let current_frame = self.current_visibility_frame;
         for (_, text_edit) in self.text_edits.iter_mut() {
-            if self.shared.changed_style_keys.contains(&text_edit.text_box.style.key) {
+            if styles_changed && self.shared.changed_style_keys.contains(&text_edit.text_box.style.key) {
                 text_edit.text_box.needs_relayout = true;
             }
             if !text_edit.text_box.hidden() && text_edit.text_box.last_frame_touched == current_frame {
@@ -1070,8 +1073,7 @@ impl Text {
         }
 
         for (_, mut text_box) in self.text_boxes.iter_mut() {
-            if self.shared.changed_style_keys.contains(&text_box.style.key) {
-                dbg!("Sneed2");
+            if styles_changed && self.shared.changed_style_keys.contains(&text_box.style.key) {
                 text_box.needs_relayout = true;
             }
             if !text_box.hidden() && text_box.last_frame_touched == current_frame {
@@ -1081,48 +1083,7 @@ impl Text {
             }
         }
 
-        // Decoration quads: selection rects and cursor, done once for all boxes.
-        {
-            self.shared.render_data.release_decoration_quads();
-
-            let scratch = &mut self.shared.scratch_quads;
-            scratch.clear();
-            let selection_color = 0x33_33_ff_aa;
-
-            for &key in &self.shared.multi_box_selection {
-                if let Some(text_box) = self.text_boxes.get(key) {
-                    let box_index = text_box.render_data_info.box_index as u32;
-                    text_box.selection().geometry_with(&text_box.layout, |rect, _| {
-                        scratch.push(make_decoration_quad(rect, selection_color, box_index));
-                    });
-                }
-            }
-
-            if let Some(AnyBox::TextEdit(key)) = self.shared.focused {
-                if let Some(text_edit) = self.text_edits.get(key) {
-                    let text_box = &text_edit.text_box;
-                    let box_index = text_box.render_data_info.box_index as u32;
-
-                    text_box.selection().geometry_with(&text_box.layout, |rect, _| {
-                        scratch.push(make_decoration_quad(rect, selection_color, box_index));
-                    });
-
-                    if text_box.selection().is_collapsed() {
-                        let cursor_color = if self.shared.cursor_blink_animation_currently_visible { CURSOR_COLOR } else { 0x00_00_00_00 };
-                        let cursor_rect = text_box.selection().focus().geometry(&text_box.layout, CURSOR_WIDTH);
-                        scratch.push(make_decoration_quad(cursor_rect, cursor_color, box_index));
-                    }
-                }
-            }
-
-            let scratch = &self.shared.scratch_quads;
-            if !scratch.is_empty() {
-                if let Some(handle) = self.shared.render_data.glyph_quads.allocate(scratch.len() as u32) {
-                    self.shared.render_data.glyph_quads.get_mut(handle).copy_from_slice(scratch);
-                    self.shared.render_data.decoration_quad_handle = Some(handle);
-                }
-            }
-        }
+        self.prepare_decoration_quads();
 
         // Multi-window: mark prepared and check if all windows done.
         let should_clear_flags = {
@@ -1145,6 +1106,50 @@ impl Text {
 
             self.shared.scrolled = self.get_max_animation_duration().is_some();
         }
+    }
+
+    fn prepare_decoration_quads(&mut self) {
+        // Decoration quads: selection rects and cursor, done once for all boxes.
+        
+        self.shared.render_data.release_decoration_quads();
+
+        let scratch = &mut self.shared.scratch_quads;
+        scratch.clear();
+        let selection_color = 0x33_33_ff_aa;
+
+        for &key in &self.shared.multi_box_selection {
+            if let Some(text_box) = self.text_boxes.get(key) {
+                let box_index = text_box.render_data_info.box_index as u32;
+                text_box.selection().geometry_with(&text_box.layout, |rect, _| {
+                    scratch.push(make_decoration_quad(rect, selection_color, box_index));
+                });
+            }
+        }
+
+        if let Some(AnyBox::TextEdit(key)) = self.shared.focused {
+            if let Some(text_edit) = self.text_edits.get(key) {
+                let text_box = &text_edit.text_box;
+                let box_index = text_box.render_data_info.box_index as u32;
+
+                text_box.selection().geometry_with(&text_box.layout, |rect, _| {
+                    scratch.push(make_decoration_quad(rect, selection_color, box_index));
+                });
+
+                if text_box.selection().is_collapsed() {
+                    let cursor_color = if self.shared.cursor_blink_animation_currently_visible { CURSOR_COLOR } else { 0x00_00_00_00 };
+                    let cursor_rect = text_box.selection().focus().geometry(&text_box.layout, CURSOR_WIDTH);
+                    scratch.push(make_decoration_quad(cursor_rect, cursor_color, box_index));
+                }
+            }
+        }
+
+        let scratch = &self.shared.scratch_quads;
+        if !scratch.is_empty() {
+            if let Some(handle) = self.shared.render_data.glyph_quads.allocate(scratch.len() as u32) {
+                self.shared.render_data.glyph_quads.get_mut(handle).copy_from_slice(scratch);
+                self.shared.render_data.decoration_quad_handle = Some(handle);
+            }
+        }  
     }
 
     /// Returns `true` if the event was consumed by a text area.
