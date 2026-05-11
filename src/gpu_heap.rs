@@ -43,7 +43,9 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
     /// If `handle` is `Some` and points to a region that's too small to contain `data`, clears and frees the region and allocates a new one, sets `handle` to point at the new one, then writes `data`.
     /// 
     /// If `handle` is `Some` and points to a region that's big enough to contain `data`, then writes `data` into the region, and clears any remaining space at the end.
-    pub fn allocate_or_grow_and_write(&mut self, handle: &mut Option<Handle>, data: &[T]) {
+    /// `spare_capacity` is only applied when creating a fresh allocation; it is ignored when
+    /// writing into an existing allocation that already fits the data.
+    pub fn allocate_or_grow_and_write(&mut self, handle: &mut Option<Handle>, data: &[T], spare_capacity: u32) {
         if data.is_empty() {
             // Zero the existing allocation but keep it; the caller can reuse it later.
             if let Some(h) = *handle {
@@ -53,13 +55,13 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
             return;
         }
 
-        let needs_realloc = handle.map_or(true, |h| h.size as usize != data.len());
+        let needs_realloc = handle.map_or(true, |h| data.len() > h.size as usize);
 
         if needs_realloc {
             if let Some(h) = handle.take() {
                 self.free_and_clear(h);
             }
-            *handle = self.heap.allocate(data.len() as u32);
+            *handle = self.heap.allocate(data.len() as u32 + spare_capacity);
             if let Some(h) = *handle {
                 let end = h.vec_index(crate::offset_allocator_heap::CHUNK_SIZE) + h.size as usize;
                 self.watermark = self.watermark.max(end);

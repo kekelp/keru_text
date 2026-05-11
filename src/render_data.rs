@@ -509,10 +509,10 @@ impl RenderData {
         if had_relayout { self.stats.relayouts += 1; }
         if had_relayout { text_edit.text_box.needs_quad_rebuild = true; }
 
-        self.prepare_text_box_layout(&mut text_edit.text_box, scratch);
+        self.prepare_text_box_layout(&mut text_edit.text_box, scratch, 20);
     }
 
-    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, scratch: &mut Vec<GlyphQuad>) {
+    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, scratch: &mut Vec<GlyphQuad>, spare_capacity: u32) {
         let w = self.params.screen_resolution_width;
         let h = self.params.screen_resolution_height;
         let t = text_box.transform.translation;
@@ -597,7 +597,7 @@ impl RenderData {
 
         text_box.render_data_info.base_scroll = scroll_offset;
 
-        self.glyph_quads.allocate_or_grow_and_write(&mut text_box.render_data_info.glyph_quad_handle, quads);
+        self.glyph_quads.allocate_or_grow_and_write(&mut text_box.render_data_info.glyph_quad_handle, quads, spare_capacity);
 
         text_box.needs_quad_rebuild = false;
     }

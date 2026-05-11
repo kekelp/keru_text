@@ -1018,7 +1018,7 @@ impl Text {
                 text_box.needs_relayout = true;
             }
             if ! text_box.hidden() {
-                self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads);
+                self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads, 4);
             }
         }
 
@@ -1084,7 +1084,7 @@ impl Text {
 
         let scratch = &self.shared.scratch_quads;
         let rd = &mut self.shared.render_data;
-        rd.glyph_quads.allocate_or_grow_and_write(&mut rd.decoration_quad_handle, scratch);
+        rd.glyph_quads.allocate_or_grow_and_write(&mut rd.decoration_quad_handle, scratch, 20);
     }
 
     /// Returns `true` if the event was consumed by a text area.
