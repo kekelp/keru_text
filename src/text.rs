@@ -52,8 +52,6 @@ pub struct Text {
 
     pub(crate) input_state: TextInputState,
 
-    pub(crate) mouse_hit_stack: Vec<(AnyBox, f32)>,
-
     pub(crate) using_frame_based_visibility: bool,
 
     pub(crate) scroll_animations: Vec<ScrollAnimation>,
@@ -69,11 +67,121 @@ pub struct Text {
     selected_text_buffer: String,
 }
 
+/// Precomputed hit test data for a single text box or text edit, stored in `Shared::hit_tests`.
+pub(crate) struct HitTestEntry {
+    pub(crate) any_box: AnyBox,
+    pub(crate) depth: f32,
+    pub(crate) selectable: bool,
+    pub(crate) hidden: bool,
+    pub(crate) last_frame_touched: u64,
+    pub(crate) window_id: Option<WindowId>,
+    pub(crate) shape: HitTestShape,
+}
+
+/// The geometric data needed to do a hit check, as an enum so that non-rotated
+/// boxes can store a pre-transformed axis-aligned bounding box instead of the
+/// full transform.
+pub(crate) enum HitTestShape {
+    /// Non-rotated box: screen-space AABB ready for a simple range check.
+    Axis {
+        min_x: f32,
+        max_x: f32,
+        min_y: f32,
+        max_y: f32,
+    },
+    /// Rotated box: full transform data for the cursor_to_local calculation.
+    Rotated {
+        transform: Transform2D,
+        group_transform_index: Option<GroupTransformHandle>,
+        local_min_x: f32,
+        local_max_x: f32,
+        local_min_y: f32,
+        local_max_y: f32,
+    },
+}
+
+/// Compute the `HitTestShape` from a box's geometric properties.
+/// When `rotation == 0` this pre-transforms all corners and stores a plain AABB.
+pub(crate) fn compute_hit_test_shape(
+    transform: Transform2D,
+    group_transform_index: Option<GroupTransformHandle>,
+    width: f32,
+    height: f32,
+    explicit_hitbox: Option<(f32, f32, f32, f32)>,
+    group_transforms: &GpuSlab<GroupTransform>,
+) -> HitTestShape {
+    let (local_min_x, local_max_x, local_min_y, local_max_y) =
+        if let Some((hx0, hy0, hx1, hy1)) = explicit_hitbox {
+            (hx0, hx1, hy0, hy1)
+        } else {
+            (-(X_TOLERANCE as f32), width + X_TOLERANCE as f32, 0.0, height)
+        };
+
+    if transform.rotation == 0.0 {
+        let s = transform.scale;
+        let tx = transform.translation.0;
+        let ty = transform.translation.1;
+
+        let mut min_x = local_min_x * s + tx;
+        let mut max_x = local_max_x * s + tx;
+        let mut min_y = local_min_y * s + ty;
+        let mut max_y = local_max_y * s + ty;
+
+        if let Some(handle) = group_transform_index {
+            let g = &group_transforms[handle.0];
+            if g.scale != 0.0 {
+                min_x = g.offset[0] + min_x * g.scale;
+                max_x = g.offset[0] + max_x * g.scale;
+                min_y = g.offset[1] + min_y * g.scale;
+                max_y = g.offset[1] + max_y * g.scale;
+            }
+        }
+
+        if min_x > max_x { std::mem::swap(&mut min_x, &mut max_x); }
+        if min_y > max_y { std::mem::swap(&mut min_y, &mut max_y); }
+
+        HitTestShape::Axis { min_x, max_x, min_y, max_y }
+    } else {
+        HitTestShape::Rotated {
+            transform,
+            group_transform_index,
+            local_min_x,
+            local_max_x,
+            local_min_y,
+            local_max_y,
+        }
+    }
+}
+
+fn hit_test_shape_check(shape: &HitTestShape, cursor_pos: (f64, f64), group_transforms: &GpuSlab<GroupTransform>) -> bool {
+    let cx = cursor_pos.0 as f32;
+    let cy = cursor_pos.1 as f32;
+    match shape {
+        HitTestShape::Axis { min_x, max_x, min_y, max_y } => {
+            cx >= *min_x && cx <= *max_x && cy >= *min_y && cy <= *max_y
+        }
+        HitTestShape::Rotated { transform, group_transform_index, local_min_x, local_max_x, local_min_y, local_max_y } => {
+            let mut pos = euclid::Point2D::new(cx, cy);
+            if let Some(handle) = group_transform_index {
+                let g = &group_transforms[handle.0];
+                if g.scale != 0.0 {
+                    pos.x = (pos.x - g.offset[0]) / g.scale;
+                    pos.y = (pos.y - g.offset[1]) / g.scale;
+                }
+            }
+            let inv = transform.inverse().unwrap_or(Transform2D::identity());
+            let local = inv.transform_point(pos);
+            local.x >= *local_min_x && local.x <= *local_max_x && local.y >= *local_min_y && local.y <= *local_max_y
+        }
+    }
+}
+
 /// Data that TextBoxMut and similar things need to have a reference to.
 pub(crate) struct Shared {
     pub(crate) render_data: RenderData,
 
     pub styles: Slab<StyleInner>,
+    pub(crate) hit_tests: Slab<HitTestEntry>,
     pub rebuild_glyph_quad_buffer: bool,
     pub scrolled: bool,
     pub focused: Option<AnyBox>,
@@ -426,7 +534,6 @@ impl Text {
             text_boxes: Slab::with_capacity(10),
             text_edits: Slab::with_capacity(10),
             input_state: TextInputState::new(),
-            mouse_hit_stack: Vec::with_capacity(6),
             scroll_animations: Vec::new(),
             current_visibility_frame: 1,
             using_frame_based_visibility: false,
@@ -441,6 +548,7 @@ impl Text {
                 render_data,
                 windows: Vec::with_capacity(1),
                 styles,
+                hit_tests: Slab::with_capacity(10),
                 rebuild_glyph_quad_buffer: true,
                 scrolled: true,
                 focused: None,
@@ -572,6 +680,18 @@ impl Text {
         let handle = TextBoxHandle { key };
         // Fill in the local copy of the key.
         self.get_text_box_mut(&handle).key = key;
+        let tb = &self.text_boxes[key];
+        let shape = compute_hit_test_shape(tb.transform, tb.group_transform_index, tb.width, tb.height, tb.explicit_hitbox, &self.shared.render_data.group_transforms);
+        let hit_test_key = self.shared.hit_tests.insert(HitTestEntry {
+            any_box: AnyBox::TextBox(key),
+            depth: tb.depth,
+            selectable: tb.selectable,
+            hidden: tb.hidden,
+            last_frame_touched: tb.last_frame_touched,
+            window_id: tb.window_id,
+            shape,
+        });
+        self.text_boxes[key].hit_test_key = hit_test_key;
         return handle;
     }
 
@@ -593,6 +713,18 @@ impl Text {
         let handle = TextEditHandle { key };
         // Fill in the local copy of the key.
         self.get_text_edit_mut(&handle).text_box.key = key;
+        let tb = &self.text_edits[key].text_box;
+        let shape = compute_hit_test_shape(tb.transform, tb.group_transform_index, tb.width, tb.height, tb.explicit_hitbox, &self.shared.render_data.group_transforms);
+        let hit_test_key = self.shared.hit_tests.insert(HitTestEntry {
+            any_box: AnyBox::TextEdit(key),
+            depth: tb.depth,
+            selectable: tb.selectable,
+            hidden: tb.hidden,
+            last_frame_touched: tb.last_frame_touched,
+            window_id: tb.window_id,
+            shape,
+        });
+        self.text_edits[key].text_box.hit_test_key = hit_test_key;
         return handle;
     }
 
@@ -610,6 +742,18 @@ impl Text {
         let handle = TextBoxHandle { key };
         // Fill in the local copy of the key.
         self.get_text_box_mut(&handle).key = key;
+        let tb = &self.text_boxes[key];
+        let shape = compute_hit_test_shape(tb.transform, tb.group_transform_index, tb.width, tb.height, tb.explicit_hitbox, &self.shared.render_data.group_transforms);
+        let hit_test_key = self.shared.hit_tests.insert(HitTestEntry {
+            any_box: AnyBox::TextBox(key),
+            depth: tb.depth,
+            selectable: tb.selectable,
+            hidden: tb.hidden,
+            last_frame_touched: tb.last_frame_touched,
+            window_id: tb.window_id,
+            shape,
+        });
+        self.text_boxes[key].hit_test_key = hit_test_key;
         return handle;
     }
 
@@ -627,6 +771,18 @@ impl Text {
         let handle = TextEditHandle { key };
         // Fill in the local copy of the key.
         self.get_text_edit_mut(&handle).text_box.key = key;
+        let tb = &self.text_edits[key].text_box;
+        let shape = compute_hit_test_shape(tb.transform, tb.group_transform_index, tb.width, tb.height, tb.explicit_hitbox, &self.shared.render_data.group_transforms);
+        let hit_test_key = self.shared.hit_tests.insert(HitTestEntry {
+            any_box: AnyBox::TextEdit(key),
+            depth: tb.depth,
+            selectable: tb.selectable,
+            hidden: tb.hidden,
+            last_frame_touched: tb.last_frame_touched,
+            window_id: tb.window_id,
+            shape,
+        });
+        self.text_edits[key].text_box.hit_test_key = hit_test_key;
         return handle;
     }
 
@@ -743,15 +899,19 @@ impl Text {
     pub fn refresh_text_box(&mut self, handle: &TextBoxHandle) {
         if let Some(text_box) = self.text_boxes.get_mut(handle.key) {
             text_box.last_frame_touched = self.current_visibility_frame;
+            let hit_test_key = text_box.hit_test_key;
+            self.shared.hit_tests[hit_test_key].last_frame_touched = self.current_visibility_frame;
         }
     }
 
     /// Refresh a text edit box, causing it to stay visible even if [`Text::advance_frame_and_hide_boxes()`] was called.
-    /// 
+    ///
     /// Part of the "declarative" interface.
     pub fn refresh_text_edit(&mut self, handle: &TextEditHandle) {
         if let Some(text_edit) = self.text_edits.get_mut(handle.key) {
             text_edit.text_box.last_frame_touched = self.current_visibility_frame;
+            let hit_test_key = text_edit.text_box.hit_test_key;
+            self.shared.hit_tests[hit_test_key].last_frame_touched = self.current_visibility_frame;
         }
     }
 
@@ -775,16 +935,17 @@ impl Text {
         }
         
         let text_box = self.text_boxes.remove(handle.key);
-        
+
         let box_data_i = text_box.render_data_info.box_index;
         self.shared.render_data.box_data.remove(box_data_i);
+        self.shared.hit_tests.remove(text_box.hit_test_key);
 
         std::mem::forget(handle);
     }
 
 
     /// Remove a text edit.
-    /// 
+    ///
     /// `handle` is the handle that was returned when first creating the text edit with [`Text::add_text_edit()`] or similar functions.
     pub fn remove_text_edit(&mut self, handle: TextEditHandle) {
         self.shared.rebuild_glyph_quad_buffer = true;
@@ -793,7 +954,7 @@ impl Text {
                 self.shared.focused = None;
             }
         }
-        
+
         // Remove from accessibility mapping if it exists
         #[cfg(feature = "accessibility")]
         if let Some((_text_edit, text_box)) = self.text_edits.get(handle.key) {
@@ -801,11 +962,12 @@ impl Text {
                 self.accesskit_id_to_text_handle_map.remove(&accesskit_id);
             }
         }
-        
+
         let text_edit = self.text_edits.remove(handle.key);
 
         let box_data_i = text_edit.text_box.render_data_info.box_index;
         self.shared.render_data.box_data.remove(box_data_i);
+        self.shared.hit_tests.remove(text_edit.text_box.hit_test_key);
 
         std::mem::forget(handle);
     }
@@ -1098,36 +1260,19 @@ impl Text {
         return event_consumed;
     }
 
-    fn find_topmost_selectable_at_pos_for_window(&mut self, cursor_pos: (f64, f64), window_id: WindowId) -> Option<AnyBox> {
-        self.mouse_hit_stack.clear();
-
-        // Find all text widgets at this position that belong to this window
-        for (i, ed) in self.text_edits.iter_mut() {
-            if ! ed.text_box.selectable { continue };
-            if !ed.text_box.hidden && ed.text_box.last_frame_touched == self.current_visibility_frame && ed.text_box.hit_full_rect(cursor_pos) {
-                // Only consider if this text edit belongs to this window (or has no window restriction)
-                if ed.text_box.window_id.is_none() || ed.text_box.window_id == Some(window_id) {
-                    self.mouse_hit_stack.push((AnyBox::TextEdit(i), ed.text_box.depth));
-                }
-            }
-        }
-        for (i, text_box) in self.text_boxes.iter_mut() {
-            if ! text_box.selectable { continue };
-            if !text_box.hidden && text_box.last_frame_touched == self.current_visibility_frame && text_box.hit_bounding_box(cursor_pos) {
-                // Only consider if this text box belongs to this window (or has no window restriction)
-                if text_box.window_id.is_none() || text_box.window_id == Some(window_id) {
-                    self.mouse_hit_stack.push((AnyBox::TextBox(i), text_box.depth));
-                }
-            }
-        }
-
-        // Find the topmost (lowest depth value)
+    fn find_topmost_selectable_at_pos_for_window(&self, cursor_pos: (f64, f64), window_id: WindowId) -> Option<AnyBox> {
         let mut topmost = None;
         let mut top_z = f32::MAX;
-        for (id, z) in self.mouse_hit_stack.iter() {
-            if *z < top_z {
-                top_z = *z;
-                topmost = Some(*id);
+
+        for (_, entry) in self.shared.hit_tests.iter() {
+            if !entry.selectable { continue; }
+            if entry.hidden { continue; }
+            if entry.last_frame_touched != self.current_visibility_frame { continue; }
+            if entry.window_id.is_some() && entry.window_id != Some(window_id) { continue; }
+            if !hit_test_shape_check(&entry.shape, cursor_pos, &self.shared.render_data.group_transforms) { continue; }
+            if entry.depth < top_z {
+                top_z = entry.depth;
+                topmost = Some(entry.any_box);
             }
         }
 
@@ -1214,28 +1359,17 @@ impl Text {
         }
     }
 
-    fn find_topmost_at_pos(&mut self, cursor_pos: (f64, f64)) -> Option<AnyBox> {
-        self.mouse_hit_stack.clear();
-
-        // Find all text widgets at this position
-        for (i, te) in self.text_edits.iter_mut() {
-            if !te.text_box.hidden && te.text_box.last_frame_touched == self.current_visibility_frame && te.text_box.hit_full_rect(cursor_pos) {
-                self.mouse_hit_stack.push((AnyBox::TextEdit(i), te.text_box.depth));
-            }
-        }
-        for (i, text_box) in self.text_boxes.iter_mut() {
-            if !text_box.hidden && text_box.last_frame_touched == self.current_visibility_frame && text_box.hit_bounding_box(cursor_pos) {
-                self.mouse_hit_stack.push((AnyBox::TextBox(i), text_box.depth));
-            }
-        }
-
-        // Find the topmost (lowest depth value)
+    fn find_topmost_at_pos(&self, cursor_pos: (f64, f64)) -> Option<AnyBox> {
         let mut topmost = None;
         let mut top_z = f32::MAX;
-        for (id, z) in self.mouse_hit_stack.iter() {
-            if *z < top_z {
-                top_z = *z;
-                topmost = Some(*id);
+
+        for (_, entry) in self.shared.hit_tests.iter() {
+            if entry.hidden { continue; }
+            if entry.last_frame_touched != self.current_visibility_frame { continue; }
+            if !hit_test_shape_check(&entry.shape, cursor_pos, &self.shared.render_data.group_transforms) { continue; }
+            if entry.depth < top_z {
+                top_z = entry.depth;
+                topmost = Some(entry.any_box);
             }
         }
 

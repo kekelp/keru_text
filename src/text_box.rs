@@ -15,7 +15,7 @@ use crate::*;
 use std::hash::{Hash, Hasher};
 use ahash::AHasher;
 
-const X_TOLERANCE: f64 = 35.0;
+pub(crate) const X_TOLERANCE: f64 = 35.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextIdentity {
@@ -81,6 +81,9 @@ pub struct TextBox {
     /// Copy of the key that this textbox corresponds to. (or the parent text_edit_box! That's a bit messy).
     /// todo: try to get rid of this.
     pub(crate) key: usize,
+
+    /// Key into `Shared::hit_tests` for this box's precomputed hit test entry.
+    pub(crate) hit_test_key: usize,
 
     /// For cross-box selection: the next text box in the sequence.
     /// When selecting past the end of this box, selection continues into the next box.
@@ -190,6 +193,7 @@ impl TextBox {
             explicit_hitbox: None,
             shared_backref,
             key: usize::MAX, // Remember to fill it in later, I guess.
+            hit_test_key: usize::MAX, // Filled in after insertion into the slab.
             next_box: None,
             prev_box: None,
             ranged_style_properties: Vec::with_capacity(3),
@@ -320,6 +324,30 @@ impl TextBox {
     }
     pub(crate) fn shared(&self) -> &Shared {
         unsafe { self.shared_backref.as_ref() }
+    }
+
+    pub(crate) fn rebuild_hit_test_data(&mut self) {
+        let shape = compute_hit_test_shape(
+            self.transform,
+            self.group_transform_index,
+            self.width,
+            self.height,
+            self.explicit_hitbox,
+            &self.shared().render_data.group_transforms,
+        );
+        let key = self.hit_test_key;
+        let depth = self.depth;
+        let selectable = self.selectable;
+        let hidden = self.hidden;
+        let last_frame_touched = self.last_frame_touched;
+        let window_id = self.window_id;
+        let entry = &mut self.shared_mut().hit_tests[key];
+        entry.depth = depth;
+        entry.selectable = selectable;
+        entry.hidden = hidden;
+        entry.last_frame_touched = last_frame_touched;
+        entry.window_id = window_id;
+        entry.shape = shape;
     }
 
     /// Transforms a screen-space cursor position to text box local space,
@@ -875,6 +903,7 @@ impl TextBox {
         box_data.translation = [transform.translation.0, transform.translation.1];
         box_data.rotation = transform.rotation;
         box_data.scale = transform.scale;
+        self.rebuild_hit_test_data();
     }
 
     /// Sets the text box to use a group transform in addition to its own one.
@@ -888,6 +917,7 @@ impl TextBox {
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).group_transform_index = transform.0 as u32;
         self.group_transform_index = Some(transform);
+        self.rebuild_hit_test_data();
     }
 
     /// Returns the current transform of the text box.
@@ -909,6 +939,7 @@ impl TextBox {
         self.transform.translation = (x, y);
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).translation = [x, y];
+        self.rebuild_hit_test_data();
     }
 
     /// Sets the rotation of the text box in radians.
@@ -921,6 +952,7 @@ impl TextBox {
         self.transform.rotation = radians;
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).rotation = radians;
+        self.rebuild_hit_test_data();
     }
 
     /// Hides or unhides the text box.
@@ -935,6 +967,7 @@ impl TextBox {
             self.reset_selection();
         }
         self.shared_mut().rebuild_glyph_quad_buffer = true;
+        self.rebuild_hit_test_data();
     }
 
     /// Sets the depth (z-order) of the text box.
@@ -947,6 +980,7 @@ impl TextBox {
         self.depth = depth;
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).depth = depth;
+        self.rebuild_hit_test_data();
     }
 
     /// Sets a screen-space clip rect.
@@ -992,6 +1026,7 @@ impl TextBox {
     /// computing one from the text box dimensions or layout.
     pub fn set_hitbox(&mut self, hitbox: Option<(f32, f32, f32, f32)>) {
         self.explicit_hitbox = hitbox;
+        self.rebuild_hit_test_data();
     }
 
     /// Returns the explicit hitbox if set.
@@ -1108,6 +1143,7 @@ impl TextBox {
         self.max_advance = size.0;
         if relayout {
             self.needs_relayout = true;
+            self.rebuild_hit_test_data();
         }
     }
 
@@ -1465,6 +1501,7 @@ impl TextBox {
     /// Sets whether the text is selectable.
     pub fn set_selectable(&mut self, selectable: bool) {
         self.selectable = selectable;
+        self.rebuild_hit_test_data();
     }
     
     #[cfg(feature = "accessibility")]
