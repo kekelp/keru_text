@@ -1119,8 +1119,6 @@ impl Text {
 
         // Decoration quads: selection rects and cursor, done once for all boxes.
 
-        self.shared.render_data.release_decoration_quads();
-
         let scratch = &mut self.shared.scratch_quads;
         scratch.clear();
         let selection_color = 0x33_33_ff_aa;
@@ -1152,12 +1150,8 @@ impl Text {
         }
 
         let scratch = &self.shared.scratch_quads;
-        if !scratch.is_empty() {
-            if let Some(handle) = self.shared.render_data.glyph_quads.allocate(scratch.len() as u32) {
-                self.shared.render_data.glyph_quads.get_mut(handle).copy_from_slice(scratch);
-                self.shared.render_data.decoration_quad_handle = Some(handle);
-            }
-        }  
+        let rd = &mut self.shared.render_data;
+        rd.glyph_quads.allocate_or_grow_and_write(&mut rd.decoration_quad_handle, scratch);
     }
 
     /// Returns `true` if the event was consumed by a text area.

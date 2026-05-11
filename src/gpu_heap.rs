@@ -46,6 +46,38 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
         self.heap.get_mut(handle)
     }
 
+    /// If `handle` is `None`, allocates a new region with enough space for `data`, then updates `handle` to contain a handle to the new allocation, then writes `data` in the new region.
+    /// 
+    /// If `handle` is `Some` and points to a region that's too small to contain `data`, clears and frees the region and allocates a new one, sets `handle` to point at the new one, then writes `data`.
+    /// 
+    /// If `handle` is `Some` and points to a region that's big enough to contain `data`, then writes `data` into the region, and clears any remaining space at the end.
+    pub fn allocate_or_grow_and_write(&mut self, handle: &mut Option<Handle>, data: &[T]) {
+        if data.is_empty() {
+            // Zero the existing allocation but keep it; the caller can reuse it later.
+            if let Some(h) = *handle {
+                self.heap.get_mut(h).fill(T::default());
+                self.need_gpu_sync = true;
+            }
+            return;
+        }
+
+        let needs_realloc = handle.map_or(true, |h| h.size as usize != data.len());
+
+        if needs_realloc {
+            if let Some(h) = handle.take() {
+                self.free_and_clear(h);
+            }
+            *handle = self.heap.allocate(data.len() as u32);
+        }
+
+        if let Some(h) = *handle {
+            let slot = self.heap.get_mut(h);
+            slot[..data.len()].copy_from_slice(data);
+            slot[data.len()..].fill(T::default());
+            self.need_gpu_sync = true;
+        }
+    }
+
     pub fn _get(&mut self, handle: Handle) -> &[T] {
         self.heap._get(handle)
     }

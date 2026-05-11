@@ -467,13 +467,6 @@ impl RenderData {
         self.last_frame_evicted != current_frame
     }
 
-    /// Zero out and free the shared decoration quad heap allocation.
-    pub(crate) fn release_decoration_quads(&mut self) {
-        if let Some(handle) = self.decoration_quad_handle.take() {
-            self.glyph_quads.free_and_clear(handle);
-        }
-    }
-
     /// Advance the frame counter.
     pub fn advance_frame(&mut self) {
         self.frame += 1;
@@ -605,15 +598,7 @@ impl RenderData {
 
         text_box.render_data_info.base_scroll = scroll_offset;
 
-        // Free old allocation and replace with the new quads.
-        self.release_glyph_quads(&mut text_box.render_data_info);
-
-        if !quads.is_empty() {
-            if let Some(handle) = self.glyph_quads.allocate(quads.len() as u32) {
-                text_box.render_data_info.glyph_quad_handle = Some(handle);
-                self.glyph_quads.get_mut(handle).copy_from_slice(&quads);
-            }
-        }
+        self.glyph_quads.allocate_or_grow_and_write(&mut text_box.render_data_info.glyph_quad_handle, quads);
 
         text_box.needs_quad_rebuild = false;
     }
