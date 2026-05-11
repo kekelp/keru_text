@@ -490,8 +490,7 @@ impl RenderData {
 
     /// Prepare a text edit layout for rendering with scrolling and clipping support.
     pub fn prepare_text_edit_layout(&mut self, text_edit: &mut TextEdit, scratch: &mut Vec<GlyphQuad>) {
-        if text_edit.hidden() || text_edit.text_box.offscreen {
-            self.release_glyph_quads(&mut text_edit.text_box.render_data_info);
+        if text_edit.hidden() {
             return;
         }
 
@@ -517,22 +516,28 @@ impl RenderData {
         let w = self.params.screen_resolution_width;
         let h = self.params.screen_resolution_height;
         let t = text_box.transform.translation;
-        text_box.offscreen = t.0 < -(5.0 * w) || t.0 > 6.0 * w || t.1 < -(5.0 * h) || t.1 > 6.0 * h;
+        let offscreen = t.0 < -(5.0 * w) || t.0 > 6.0 * w || t.1 < -(5.0 * h) || t.1 > 6.0 * h;
 
-        if text_box.hidden() || text_box.offscreen {
-            #[cfg(debug_assertions)]
-            { self.stats.boxes_skipped += 1; }
+        if text_box.hidden() || offscreen {
+            #[cfg(debug_assertions)] {
+                self.stats.boxes_skipped += 1;
+            }
             self.release_glyph_quads(&mut text_box.render_data_info);
             return;
         }
-        #[cfg(debug_assertions)]
-        { self.stats.boxes_prepared += 1; }
+        #[cfg(debug_assertions)] {
+            self.stats.boxes_prepared += 1;
+        }
+        
+        let _needs_relayout = text_box.needs_relayout();
 
-        let had_relayout = text_box.needs_relayout();
-        text_box.refresh_layout();
-        #[cfg(debug_assertions)]
-        if had_relayout { self.stats.relayouts += 1; }
-        if had_relayout { text_box.needs_quad_rebuild = true; }
+        text_box.refresh_layout(None);
+        
+        #[cfg(debug_assertions)] {
+            if _needs_relayout {
+                self.stats.relayouts += 1;            
+            }
+        }
 
         if text_box.is_scroll_distance_above_tolerance() {
             text_box.needs_quad_rebuild = true;

@@ -52,11 +52,7 @@ pub struct Text {
 
     pub(crate) input_state: TextInputState,
 
-    pub(crate) using_frame_based_visibility: bool,
-
     pub(crate) scroll_animations: Vec<ScrollAnimation>,
-
-    pub(crate) current_visibility_frame: u64,
 
     pub(crate) renderer: TextRenderer,
 
@@ -73,7 +69,6 @@ pub(crate) struct HitTestEntry {
     pub(crate) depth: f32,
     pub(crate) selectable: bool,
     pub(crate) hidden: bool,
-    pub(crate) last_frame_touched: u64,
     pub(crate) window_id: Option<WindowId>,
     pub(crate) shape: HitTestShape,
 }
@@ -182,7 +177,6 @@ pub(crate) struct Shared {
 
     pub styles: Slab<StyleInner>,
     pub(crate) hit_tests: Slab<HitTestEntry>,
-    pub rebuild_glyph_quad_buffer: bool,
     pub scrolled: bool,
     pub focused: Option<AnyBox>,
 
@@ -535,8 +529,6 @@ impl Text {
             text_edits: Slab::with_capacity(10),
             input_state: TextInputState::new(),
             scroll_animations: Vec::new(),
-            current_visibility_frame: 1,
-            using_frame_based_visibility: false,
             renderer,
 
             #[cfg(feature = "accessibility")]
@@ -549,7 +541,6 @@ impl Text {
                 windows: Vec::with_capacity(1),
                 styles,
                 hit_tests: Slab::with_capacity(10),
-                rebuild_glyph_quad_buffer: true,
                 scrolled: true,
                 focused: None,
                 multi_box_selection: Vec::new(),
@@ -675,7 +666,6 @@ impl Text {
         let box_data_i = self.shared.render_data.box_data.insert(BoxGpu::zeroed());
         text_box.render_data_info.box_index = box_data_i;
 
-        text_box.last_frame_touched = self.current_visibility_frame;
         let key = self.text_boxes.insert(text_box);
         let handle = TextBoxHandle { key };
         // Fill in the local copy of the key.
@@ -687,7 +677,6 @@ impl Text {
             depth: tb.depth,
             selectable: tb.selectable,
             hidden: tb.hidden,
-            last_frame_touched: tb.last_frame_touched,
             window_id: tb.window_id,
             shape,
         });
@@ -708,7 +697,6 @@ impl Text {
         let box_data_i = self.shared.render_data.box_data.insert(BoxGpu::zeroed());
         text_edit.text_box.render_data_info.box_index = box_data_i;
 
-        text_edit.text_box.last_frame_touched = self.current_visibility_frame;
         let key = self.text_edits.insert(text_edit);
         let handle = TextEditHandle { key };
         // Fill in the local copy of the key.
@@ -720,7 +708,6 @@ impl Text {
             depth: tb.depth,
             selectable: tb.selectable,
             hidden: tb.hidden,
-            last_frame_touched: tb.last_frame_touched,
             window_id: tb.window_id,
             shape,
         });
@@ -736,7 +723,6 @@ impl Text {
     pub fn add_text_box_for_window(&mut self, text: impl Into<Cow<'static, str>>, pos: (f64, f64), size: (f32, f32), depth: f32, window_id: WindowId) -> TextBoxHandle {
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
         let mut text_box = TextBox::new(text, pos, size, depth, DEFAULT_STYLE_KEY, shared_backref);
-        text_box.last_frame_touched = self.current_visibility_frame;
         text_box.window_id = Some(window_id);
         let key = self.text_boxes.insert(text_box);
         let handle = TextBoxHandle { key };
@@ -749,7 +735,6 @@ impl Text {
             depth: tb.depth,
             selectable: tb.selectable,
             hidden: tb.hidden,
-            last_frame_touched: tb.last_frame_touched,
             window_id: tb.window_id,
             shape,
         });
@@ -765,7 +750,6 @@ impl Text {
     pub fn add_text_edit_for_window(&mut self, text: String, pos: (f64, f64), size: (f32, f32), depth: f32, window_id: WindowId) -> TextEditHandle {
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
         let mut text_edit = TextEdit::new(text, pos, size, depth, DEFAULT_STYLE_KEY, shared_backref);
-        text_edit.text_box.last_frame_touched = self.current_visibility_frame;
         text_edit.text_box.window_id = Some(window_id);
         let key = self.text_edits.insert(text_edit);
         let handle = TextEditHandle { key };
@@ -778,7 +762,6 @@ impl Text {
             depth: tb.depth,
             selectable: tb.selectable,
             hidden: tb.hidden,
-            last_frame_touched: tb.last_frame_touched,
             window_id: tb.window_id,
             shape,
         });
@@ -836,7 +819,6 @@ impl Text {
     /// Returns a mutable reference to the text style.
     pub fn get_text_style_mut(&mut self, handle: &StyleHandle) -> &mut TextStyle2 {
         self.shared.changed_style_keys.push(handle.key);
-        self.shared.rebuild_glyph_quad_buffer = true;
         &mut self.shared.styles[handle.key].text_style
     }
 
@@ -848,7 +830,6 @@ impl Text {
     /// Returns a mutable reference to the text edit style.
     pub fn get_text_edit_style_mut(&mut self, handle: &StyleHandle) -> &mut TextEditStyle {
         self.shared.changed_style_keys.push(handle.key);
-        self.shared.rebuild_glyph_quad_buffer = true;
         &mut self.shared.styles[handle.key].text_edit_style
     }
 
@@ -861,7 +842,6 @@ impl Text {
     pub fn get_default_text_style_mut(&mut self) -> &mut TextStyle2 {
         let default_style_key = DEFAULT_STYLE_KEY;
         self.shared.changed_style_keys.push(default_style_key);
-        self.shared.rebuild_glyph_quad_buffer = true;
         &mut self.shared.styles[default_style_key].text_style
     }
 
@@ -874,7 +854,6 @@ impl Text {
     pub fn get_default_text_edit_style_mut(&mut self) -> &mut TextEditStyle {
         let default_style_key = DEFAULT_STYLE_KEY;
         self.shared.changed_style_keys.push(default_style_key);
-        self.shared.rebuild_glyph_quad_buffer = true;
         &mut self.shared.styles[default_style_key].text_edit_style
     }
 
@@ -883,43 +862,10 @@ impl Text {
         original_default_style()
     }
 
-    /// Advance an internal global frame counter that causes all text boxes to be implicitly marked as outdated and hidden.
-    /// 
-    /// You can then use [`Text::refresh_text_box()`] to "refresh" only the text boxes that should stay visible.
-    /// 
-    /// This allows to control the visibility of text boxes in a more "declarative" way.
-    pub fn advance_frame_and_hide_boxes(&mut self) {
-        self.current_visibility_frame += 1;
-        self.using_frame_based_visibility = true;
-    }
-
-    /// Refresh a text box, causing it to stay visible even if [`Text::advance_frame_and_hide_boxes()`] was called.
-    /// 
-    /// Part of the "declarative" interface.  
-    pub fn refresh_text_box(&mut self, handle: &TextBoxHandle) {
-        if let Some(text_box) = self.text_boxes.get_mut(handle.key) {
-            text_box.last_frame_touched = self.current_visibility_frame;
-            let hit_test_key = text_box.hit_test_key;
-            self.shared.hit_tests[hit_test_key].last_frame_touched = self.current_visibility_frame;
-        }
-    }
-
-    /// Refresh a text edit box, causing it to stay visible even if [`Text::advance_frame_and_hide_boxes()`] was called.
-    ///
-    /// Part of the "declarative" interface.
-    pub fn refresh_text_edit(&mut self, handle: &TextEditHandle) {
-        if let Some(text_edit) = self.text_edits.get_mut(handle.key) {
-            text_edit.text_box.last_frame_touched = self.current_visibility_frame;
-            let hit_test_key = text_edit.text_box.hit_test_key;
-            self.shared.hit_tests[hit_test_key].last_frame_touched = self.current_visibility_frame;
-        }
-    }
-
     /// Remove a text box.
     /// 
     /// `handle` is the handle that was returned when first creating the text box with [`Text::add_text_box()`].
     pub fn remove_text_box(&mut self, handle: TextBoxHandle) {
-        self.shared.rebuild_glyph_quad_buffer = true;
         if let Some(AnyBox::TextBox(key)) = self.shared.focused {
             if key == handle.key {
                 self.shared.focused = None;
@@ -948,7 +894,6 @@ impl Text {
     ///
     /// `handle` is the handle that was returned when first creating the text edit with [`Text::add_text_edit()`] or similar functions.
     pub fn remove_text_edit(&mut self, handle: TextEditHandle) {
-        self.shared.rebuild_glyph_quad_buffer = true;
         if let Some(AnyBox::TextEdit(i)) = self.shared.focused {
             if i == handle.key {
                 self.shared.focused = None;
@@ -1034,7 +979,6 @@ impl Text {
         let Some((window_id, window_size)) = res else {
             // Even if there are no windows, we should reset the change flags
             // so they don't stay stuck at true
-            self.shared.rebuild_glyph_quad_buffer = false;
             return;
         };
 
@@ -1059,16 +1003,13 @@ impl Text {
 
         self.shared.render_data.advance_frame();
 
-        // Each box decides internally whether to do a full rebuild or a fast BoxGpu-only update.
-        let current_frame = self.current_visibility_frame;
+
         for (_, text_edit) in self.text_edits.iter_mut() {
             if styles_changed && self.shared.changed_style_keys.contains(&text_edit.text_box.style.key) {
                 text_edit.text_box.needs_relayout = true;
             }
-            if !text_edit.text_box.hidden() && text_edit.text_box.last_frame_touched == current_frame {
+            if ! text_edit.text_box.hidden() {
                 self.shared.render_data.prepare_text_edit_layout(text_edit, &mut self.shared.scratch_quads);
-            } else {
-                self.shared.render_data.release_glyph_quads(&mut text_edit.text_box.render_data_info);
             }
         }
 
@@ -1076,16 +1017,11 @@ impl Text {
             if styles_changed && self.shared.changed_style_keys.contains(&text_box.style.key) {
                 text_box.needs_relayout = true;
             }
-            if !text_box.hidden() && text_box.last_frame_touched == current_frame {
+            if ! text_box.hidden() {
                 self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads);
-            } else {
-                self.shared.render_data.release_glyph_quads(&mut text_box.render_data_info);
             }
         }
 
-        if self.shared.rebuild_glyph_quad_buffer {
-            self.shared.decorations_dirty = true;
-        }
         self.prepare_decoration_quads();
 
         // Multi-window: mark prepared and check if all windows done.
@@ -1097,9 +1033,6 @@ impl Text {
         };
 
         if should_clear_flags {
-            self.shared.rebuild_glyph_quad_buffer = false;
-            self.using_frame_based_visibility = false;
-
             // Reset all windows to unprepared for next frame
             for window_info in &mut self.shared.windows {
                 window_info.prepared = false;
@@ -1274,7 +1207,6 @@ impl Text {
         for (_, entry) in self.shared.hit_tests.iter() {
             if !entry.selectable { continue; }
             if entry.hidden { continue; }
-            if entry.last_frame_touched != self.current_visibility_frame { continue; }
             if entry.window_id.is_some() && entry.window_id != Some(window_id) { continue; }
             if !hit_test_shape_check(&entry.shape, cursor_pos, &self.shared.render_data.group_transforms) { continue; }
             if entry.depth < top_z {
@@ -1372,7 +1304,6 @@ impl Text {
 
         for (_, entry) in self.shared.hit_tests.iter() {
             if entry.hidden { continue; }
-            if entry.last_frame_touched != self.current_visibility_frame { continue; }
             if !hit_test_shape_check(&entry.shape, cursor_pos, &self.shared.render_data.group_transforms) { continue; }
             if entry.depth < top_z {
                 top_z = entry.depth;
@@ -1424,7 +1355,6 @@ impl Text {
 
         if focus_changed {
             // todo: could skip some rerenders here if the old focus wasn't editable and had collapsed selection.
-            self.shared.rebuild_glyph_quad_buffer = true;
             self.shared.reset_cursor_blink();
         }
     }
@@ -1518,7 +1448,6 @@ impl Text {
                                 let te = self.text_edits.get_mut(i).unwrap();
                                 let tb = &mut te.text_box;
                                 if apply_shift_nav_op(&mut tb.selection, &tb.layout, event, action_mod).is_some() {
-                                    tb.shared_mut().rebuild_glyph_quad_buffer = true;
                                     return true;
                                 }
                             }
@@ -1558,9 +1487,7 @@ impl Text {
                 let handle = TextEditHandle { key: i };
                 let consumed = self.get_text_edit_mut(&handle).handle_event_editable(event, window, &input_state);
 
-                if self.shared.rebuild_glyph_quad_buffer {
-                    self.shared.reset_cursor_blink();
-                }
+                self.shared.reset_cursor_blink();
                 consumed
             },
             AnyBox::TextBox(i) => {
@@ -1593,7 +1520,6 @@ impl Text {
         let did_extend_backward = self.extend_selection_in_direction(focused_key, SelectionDirection::Backward);
 
         if did_extend_forward || did_extend_backward {
-            self.shared.rebuild_glyph_quad_buffer = true;
         }
     }
 
@@ -1722,7 +1648,6 @@ impl Text {
                 for &k in &self.shared.multi_box_selection {
                     self.text_boxes[k].selection = parley::Selection::default();
                 }
-                self.shared.rebuild_glyph_quad_buffer = true;
             }
             self.shared.multi_box_selection.clear();
 
@@ -1765,7 +1690,6 @@ impl Text {
             let new_sel = tb.selection.shift_click_extension(&tb.layout, click_x, click_y);
             tb.selection = new_sel;
             self.shared.cross_box_cursor_key = None;
-            self.shared.rebuild_glyph_quad_buffer = true;
             return true;
         }
 
@@ -1842,7 +1766,6 @@ impl Text {
         }
 
         self.shared.cross_box_cursor_key = Some(target_key);
-        self.shared.rebuild_glyph_quad_buffer = true;
         true
     }
 
@@ -1865,7 +1788,6 @@ impl Text {
         };
 
         if self.text_boxes[cursor_key].selection != sel_before {
-            self.shared.rebuild_glyph_quad_buffer = true;
             return true;
         }
 
@@ -1889,7 +1811,6 @@ impl Text {
                 if !self.shared.multi_box_selection.contains(&next_key) {
                     self.shared.multi_box_selection.push(next_key);
                 }
-                self.shared.rebuild_glyph_quad_buffer = true;
             }
             // else: at absolute chain boundary — event consumed but nothing to do.
             return true;
@@ -1941,7 +1862,6 @@ impl Text {
             }
         }
 
-        self.shared.rebuild_glyph_quad_buffer = true;
         true
     }
 
@@ -1984,7 +1904,7 @@ impl Text {
     /// 
     /// Games and applications that rerender continuously can call `Window::request_redraw()` unconditionally after every `RedrawRequested` event, without checking this method.
     pub fn needs_rerender(&mut self) -> bool {
-        return self.shared.rebuild_glyph_quad_buffer || self.shared.decorations_dirty || self.shared.scrolled;
+        return self.shared.decorations_dirty || self.shared.scrolled;
     }
 
     /// Get a mutable reference to a text box wrapped with its style.

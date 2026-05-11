@@ -30,20 +30,10 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
         }
     }
 
-    pub fn allocate(&mut self, size: u32) -> Option<Handle> {
-        let handle = self.heap.allocate(size)?;
-        Some(handle)
-    }
-
     pub fn free_and_clear(&mut self, handle: Handle) {
         self.heap.get_mut(handle).fill(T::default());
         self.heap.free(handle);
         self.need_gpu_sync = true;
-    }
-
-    pub fn get_mut(&mut self, handle: Handle) -> &mut [T] {
-        self.need_gpu_sync = true;
-        self.heap.get_mut(handle)
     }
 
     /// If `handle` is `None`, allocates a new region with enough space for `data`, then updates `handle` to contain a handle to the new allocation, then writes `data` in the new region.

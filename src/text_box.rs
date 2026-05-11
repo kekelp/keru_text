@@ -45,7 +45,6 @@ pub struct TextBox {
     #[cfg(feature = "accessibility")]
     pub(crate) accesskit_id: Option<accesskit::NodeId>,
 
-    pub(crate) needs_relayout: bool,
     pub(crate) transform: Transform2D,
     // should get rid of it and have it only in the BoxData
     pub(crate) group_transform_index: Option<GroupTransformHandle>,
@@ -60,11 +59,12 @@ pub struct TextBox {
     pub(crate) scroll_offset: (f32, f32),
     
     pub(crate) selectable: bool,
-
+    
     pub(crate) hidden: bool,
-    pub(crate) offscreen: bool,
+    
+    pub(crate) needs_relayout: bool,
     pub(crate) needs_quad_rebuild: bool,
-    pub(crate) last_frame_touched: u64,
+
     pub(crate) can_hide: bool,
     
     // Multi-window support
@@ -180,9 +180,7 @@ impl TextBox {
             auto_clip: false,
             scroll_offset: (0.0, 0.0),
             hidden: false,
-            offscreen: false,
             needs_quad_rebuild: true,
-            last_frame_touched: 0,
             can_hide: false,
             window_id: None,
             render_data_info: RenderDataInfo {
@@ -339,13 +337,11 @@ impl TextBox {
         let depth = self.depth;
         let selectable = self.selectable;
         let hidden = self.hidden;
-        let last_frame_touched = self.last_frame_touched;
         let window_id = self.window_id;
         let entry = &mut self.shared_mut().hit_tests[key];
         entry.depth = depth;
         entry.selectable = selectable;
         entry.hidden = hidden;
-        entry.last_frame_touched = last_frame_touched;
         entry.window_id = window_id;
         entry.shape = shape;
     }
@@ -526,7 +522,7 @@ impl TextBox {
                         let old_scroll = self.scroll_offset.1;
                         let new_scroll = old_scroll - scroll_amount;
 
-                        self.refresh_layout();
+                        self.refresh_layout(None);
                         let total_text_height = self.layout.height();
                         let text_height = self.height;
                         let max_scroll = (total_text_height - text_height).max(0.0).round();
@@ -543,7 +539,7 @@ impl TextBox {
         }
 
         if selection_rects_changed(initial_selection, self.selection, false) {
-            self.shared_mut().rebuild_glyph_quad_buffer = true;
+            self.shared_mut().decorations_dirty = true;
         }
 
         return consumed;
@@ -732,7 +728,6 @@ impl TextBox {
     /// After this method is called, the [`TextBox`] will assume that its text has changed. If you have to call this method many times with the same text every time, as when building a declarative or immediate mode interface, consider using a method like [`Self::set_text_hashed()`].
     pub fn text_mut(&mut self) -> &mut Cow<'static, str> {
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.text_identity = None;
         &mut self.text
     }
@@ -751,7 +746,6 @@ impl TextBox {
     /// After this method is called, the [`TextBox`] will assume that its text has changed. If you have to call this method many times with the same text every time, as when building a declarative or immediate mode interface, consider using a method like [`Self::set_text_hashed()`].
     pub fn set_text(&mut self, new_text: &str) {
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.text_identity = None;
         self.ranged_style_properties.clear();
 
@@ -778,7 +772,6 @@ impl TextBox {
         }
         self.text_identity = Some(new_identity);
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.ranged_style_properties.clear();
 
         match &mut self.text {
@@ -806,7 +799,6 @@ impl TextBox {
         }
         self.text_identity = Some(new_identity);
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.ranged_style_properties.clear();
 
         match &mut self.text {
@@ -823,7 +815,6 @@ impl TextBox {
     /// Sets the text to a static string reference.
     pub fn set_static_text(&mut self, text: &'static str) {
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.text_identity = None;
         self.ranged_style_properties.clear();
         self.text = Cow::Borrowed(text);
@@ -841,7 +832,6 @@ impl TextBox {
         }
         self.text_identity = Some(new_identity);
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.ranged_style_properties.clear();
         self.text = Cow::Borrowed(text);
     }
@@ -871,18 +861,6 @@ impl TextBox {
         self.transform.translation = new_translation;
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).translation = [pos.0 as f32, pos.1 as f32];
-
-        let (w, h) = self.shared().windows.first()
-            .map(|win| win.dimensions)
-            .unwrap_or((1920.0, 1080.0));
-        let offscreen = pos.0 < -(5.0 * w as f64) || pos.0 > 6.0 * w as f64
-            || pos.1 < -(5.0 * h as f64) || pos.1 > 6.0 * h as f64;
-        if offscreen != self.offscreen {
-            self.offscreen = offscreen;
-            // Only rebuild when transitioning in/out of culled state.
-            // Normal moves are handled by the per-box GPU transform for free.
-            self.shared_mut().rebuild_glyph_quad_buffer = true;
-        }
     }
 
     /// Sets the transform of the text box.
@@ -966,7 +944,6 @@ impl TextBox {
         if hidden {
             self.reset_selection();
         }
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
         self.rebuild_hit_test_data();
     }
 
@@ -1017,7 +994,6 @@ impl TextBox {
         }
         self.auto_clip = auto_clip;
         self.needs_quad_rebuild = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
     /// Sets an explicit hitbox for hit detection in local space (min_x, min_y, max_x, max_y).
@@ -1064,7 +1040,6 @@ impl TextBox {
         }
         self.style = style.sneak_clone();
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
     pub(crate) fn text_inner(&self) -> &str {
@@ -1163,7 +1138,6 @@ impl TextBox {
         }
         self.alignment = alignment;
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
     /// Sets the text alignment.
@@ -1182,7 +1156,6 @@ impl TextBox {
     pub fn push_ranged_style_property(&mut self, prop: StyleProperty<'static, ColorBrush>, range: std::ops::Range<usize>) {
         self.ranged_style_properties.push((prop, range));
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
     /// Sets the whole-box [`StyleProperty`] overrides, replacing any previously set overrides.
@@ -1194,14 +1167,12 @@ impl TextBox {
         }
         self.style_property_overrides = properties.to_vec();
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
     /// Clears all per-range style property overrides.
     pub fn clear_ranged_style_properties(&mut self) {
         self.ranged_style_properties.clear();
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
     /// Clears all style properties of a range.
@@ -1241,7 +1212,6 @@ impl TextBox {
         });
 
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
     /// Adjusts ranged style properties after a text edit.
@@ -1287,7 +1257,6 @@ impl TextBox {
         }
         self.transform.scale = scale;
         self.needs_relayout = true;
-        self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
     // #[cfg(feature = "accesskit")]
@@ -1478,16 +1447,16 @@ impl TextBox {
 
     /// Returns the layout, refreshing it if needed.
     pub fn layout(&mut self) -> &Layout<ColorBrush> {
-        self.refresh_layout();
+        self.refresh_layout(None);
         &self.layout
     }
     
     // todo better comment.
     /// Refresh the layout.
-    pub fn refresh_layout(&mut self) {
+    pub fn refresh_layout(&mut self, color_override: Option<ColorBrush>) {
         if self.needs_relayout() {
-            self.shared_mut().rebuild_glyph_quad_buffer = true;
-            self.rebuild_layout(None, false);
+            self.rebuild_layout(color_override, false);
+            self.needs_quad_rebuild = true;
         }
     }
 
@@ -1524,36 +1493,6 @@ impl TextBox {
 }
 
 pub use parley::BoundingBox;
-
-pub(crate) trait Ext1 {
-    fn hit_bounding_box(&mut self, cursor_pos: (f64, f64)) -> bool;
-}
-impl Ext1 for TextBox {
-    fn hit_bounding_box(&mut self, cursor_pos: (f64, f64)) -> bool {
-        self.refresh_layout();
-        // Transform cursor position to text box local space
-        let local_pos = self.cursor_to_local(cursor_pos);
-        let offset = (local_pos.x as f64, local_pos.y as f64);
-
-        // If explicit hitbox is set, use it
-        if let Some((min_x, min_y, max_x, max_y)) = self.explicit_hitbox {
-            let hit = offset.0 >= min_x as f64
-                && offset.0 <= max_x as f64
-                && offset.1 >= min_y as f64
-                && offset.1 <= max_y as f64;
-            return hit;
-        }
-
-        // Default behavior
-        let hit = offset.0 > -X_TOLERANCE
-            && offset.0 < self.layout.full_width() as f64 + X_TOLERANCE
-            && offset.1 > 0.0
-            && offset.1 < self.layout.height() as f64;
-
-        return hit;
-    }
-}
-
 
 pub(crate) trait SelectionExt {
     fn move_to_point(&mut self, layout: &Layout<ColorBrush>, x: f32, y: f32);
