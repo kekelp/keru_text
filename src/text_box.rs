@@ -12,7 +12,6 @@ use arboard::Clipboard;
 use parley::{Affinity, Alignment, Selection};
 
 use crate::*;
-use slotmap::{DefaultKey, Key as SlotMapKeyTrait};
 use std::hash::{Hash, Hasher};
 use ahash::AHasher;
 
@@ -81,14 +80,14 @@ pub struct TextBox {
     pub(crate) shared_backref: NonNull<Shared>,
     /// Copy of the key that this textbox corresponds to. (or the parent text_edit_box! That's a bit messy).
     /// todo: try to get rid of this.
-    pub(crate) key: DefaultKey,
+    pub(crate) key: usize,
 
     /// For cross-box selection: the next text box in the sequence.
     /// When selecting past the end of this box, selection continues into the next box.
-    pub(crate) next_box: Option<DefaultKey>,
+    pub(crate) next_box: Option<usize>,
     /// For cross-box selection: the previous text box in the sequence.
     /// When selecting before the start of this box, selection continues into the previous box.
-    pub(crate) prev_box: Option<DefaultKey>,
+    pub(crate) prev_box: Option<usize>,
 
     /// Per-range style overrides applied on top of the base style during layout.
     pub(crate) ranged_style_properties: Vec<(StyleProperty<'static, ColorBrush>, std::ops::Range<usize>)>,
@@ -190,7 +189,7 @@ impl TextBox {
             },
             explicit_hitbox: None,
             shared_backref,
-            key: DefaultKey::null(), // Remember to fill it in later, I guess.
+            key: usize::MAX, // Remember to fill it in later, I guess.
             next_box: None,
             prev_box: None,
             ranged_style_properties: Vec::with_capacity(3),

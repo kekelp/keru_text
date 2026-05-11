@@ -52,7 +52,7 @@
 //! 
 //! This interface is ideal for retained-mode GUI libraries, but declarative GUI libraries that diff their node trees can still use the imperative interface, calling the `Text::remove_*` functions when the nodes holding the handles are removed.
 //! 
-//! [`Text`] uses slotmaps internally, so `get_text_box_mut()` and all similar functions are basically as fast as an array lookup. There is no hashing involved.
+//! [`Text`] uses slabs internally, so `get_text_box_mut()` and all similar functions are basically as fast as an array lookup. There is no hashing involved.
 //! 
 //! # Advanced Usage
 //! 

@@ -1,7 +1,6 @@
 use crate::*;
 #[cfg(feature = "accessibility")]
 use accesskit::{NodeId, TreeUpdate};
-use slotmap::{SlotMap, DefaultKey};
 use slab::Slab;
 #[cfg(feature = "accessibility")]
 use std::collections::HashMap;
@@ -45,8 +44,8 @@ pub(crate) struct StyleInner {
 
 /// Centralized struct that holds collections of [`TextBox`]es, [`TextEdit`]s, [`TextStyle2`]s.
 pub struct Text {
-    pub(crate) text_boxes: SlotMap<DefaultKey, TextBox>,
-    pub(crate) text_edits: SlotMap<DefaultKey, TextEdit>,
+    pub(crate) text_boxes: Slab<TextBox>,
+    pub(crate) text_edits: Slab<TextEdit>,
 
     // Box to have a stable address for the backref pointers
     pub(crate) shared: Box<Shared>,
@@ -81,15 +80,15 @@ pub(crate) struct Shared {
 
     /// Text boxes that are part of the current multi-box selection.
     /// When non-empty, selection rects should be drawn for all boxes in this list.
-    pub multi_box_selection: Vec<DefaultKey>,
+    pub multi_box_selection: Vec<usize>,
 
     /// The anchor point for cross-box selection: (box_key, local_x, local_y).
     /// Set when clicking on a text box, used when shift-clicking across linked boxes.
-    pub cross_box_selection_anchor: Option<DefaultKey>,
+    pub cross_box_selection_anchor: Option<usize>,
 
     /// The box that currently holds the keyboard selection cursor for cross-box keyboard selection.
     /// None means cursor is in the focused/anchor box.
-    pub cross_box_cursor_key: Option<DefaultKey>,
+    pub cross_box_cursor_key: Option<usize>,
 
     pub windows: Vec<WindowInfo>,
     pub layout_cx: LayoutContext<ColorBrush>,
@@ -182,7 +181,7 @@ impl FocusChange {
 /// Use with [`Text::get_text_edit()`] to get a reference to the corresponding [`TextEdit`]. 
 #[derive(Debug)]
 pub struct TextEditHandle {
-    pub(crate) key: DefaultKey,
+    pub(crate) key: usize,
 }
 
 /// Cloneable handle for a text edit box.
@@ -192,7 +191,7 @@ pub struct TextEditHandle {
 /// Because this handle is not unique, the text box that it refers to can be removed while the handle is still live. This is why [`Text::try_get_text_edit()`] returns an `Option`.
 #[derive(Debug, Clone, Copy)]
 pub struct ClonedTextEditHandle {
-    pub(crate) key: DefaultKey,
+    pub(crate) key: usize,
 }
 
 /// Handle for a text box.
@@ -202,7 +201,7 @@ pub struct ClonedTextEditHandle {
 /// Use with [`Text::get_text_box()`] to get a reference to the corresponding [`TextBox`].
 #[derive(Debug)]
 pub struct TextBoxHandle {
-    pub(crate) key: DefaultKey,
+    pub(crate) key: usize,
 }
 
 /// Cloneable handle for a text box.
@@ -212,7 +211,7 @@ pub struct TextBoxHandle {
 /// Because this handle is not unique, the text box that it refers to can be removed while the handle is still live. This is why [`Text::try_get_text_box()`] returns an `Option`.
 #[derive(Debug, Clone, Copy)]
 pub struct ClonedTextBoxHandle {
-    pub(crate) key: DefaultKey,
+    pub(crate) key: usize,
 }
 
 impl TextBoxHandle {
@@ -300,9 +299,9 @@ impl MouseState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnyBox {
     /// Text edit box
-    TextEdit(DefaultKey),
+    TextEdit(usize),
     /// Text box
-    TextBox(DefaultKey),
+    TextBox(usize),
 }
 
 pub(crate) trait IntoAnyBox {
@@ -424,8 +423,8 @@ impl Text {
         );
 
         Self {
-            text_boxes: SlotMap::with_capacity(10),
-            text_edits: SlotMap::with_capacity(10),
+            text_boxes: Slab::with_capacity(10),
+            text_edits: Slab::with_capacity(10),
             input_state: TextInputState::new(),
             mouse_hit_stack: Vec::with_capacity(6),
             scroll_animations: Vec::new(),
@@ -775,7 +774,7 @@ impl Text {
             }
         }
         
-        let text_box = self.text_boxes.remove(handle.key).unwrap();
+        let text_box = self.text_boxes.remove(handle.key);
         
         let box_data_i = text_box.render_data_info.box_index;
         self.shared.render_data.box_data.remove(box_data_i);
@@ -803,7 +802,7 @@ impl Text {
             }
         }
         
-        let text_edit = self.text_edits.remove(handle.key).unwrap();
+        let text_edit = self.text_edits.remove(handle.key);
 
         let box_data_i = text_edit.text_box.render_data_info.box_index;
         self.shared.render_data.box_data.remove(box_data_i);
@@ -1440,7 +1439,7 @@ impl Text {
     }
 
     /// Handle extending selection across linked text boxes when dragging.
-    fn handle_cross_box_selection_extend(&mut self, focused_key: DefaultKey) {
+    fn handle_cross_box_selection_extend(&mut self, focused_key: usize) {
         // Reset all extended selections first, they'll be recreated as needed
         for &key in &self.shared.multi_box_selection {
             if key != focused_key {
@@ -1459,7 +1458,7 @@ impl Text {
 
     /// Extend selection in a given direction (forward to next_box, backward to prev_box).
     /// Returns true if any extension happened.
-    fn extend_selection_in_direction(&mut self, focused_key: DefaultKey, direction: SelectionDirection) -> bool {
+    fn extend_selection_in_direction(&mut self, focused_key: usize, direction: SelectionDirection) -> bool {
         let cursor_pos = self.input_state.mouse.cursor_pos;
 
         let anchor_point;
@@ -1606,7 +1605,7 @@ impl Text {
 
     /// Handle shift-click selection on TextBoxes.
     /// Uses the stored anchor to create selection spanning from anchor box to target box.
-    fn handle_shift_click_selection(&mut self, target_key: DefaultKey) -> bool {
+    fn handle_shift_click_selection(&mut self, target_key: usize) -> bool {
         let Some(anchor_key) = self.shared.cross_box_selection_anchor else {
             return false;
         };
@@ -1709,7 +1708,7 @@ impl Text {
     /// Returns true if the event was consumed.
     fn handle_keyboard_selection(
         &mut self,
-        focused_key: DefaultKey,
+        focused_key: usize,
         event: &KeyEvent,
         action_mod: bool,
     ) -> bool {
@@ -1806,7 +1805,7 @@ impl Text {
     }
 
     /// Returns true if cursor_key is reachable by following next_box links from focused_key.
-    fn is_cursor_forward_from_focused(&self, focused_key: DefaultKey, cursor_key: DefaultKey) -> bool {
+    fn is_cursor_forward_from_focused(&self, focused_key: usize, cursor_key: usize) -> bool {
         let mut cur = focused_key;
         while let Some(next) = self.text_boxes.get(cur).and_then(|b| b.next_box) {
             if next == cursor_key { return true; }
