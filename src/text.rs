@@ -37,7 +37,6 @@ pub(crate) struct WindowInfo {
 pub(crate) struct StyleInner {
     pub(crate) text_style: TextStyle2,
     pub(crate) text_edit_style: TextEditStyle,
-    pub(crate) version: u64,
 }
 
 
@@ -48,8 +47,6 @@ pub struct Text {
 
     // Box to have a stable address for the backref pointers
     pub(crate) shared: Box<Shared>,
-
-    pub(crate) style_version_id_counter: u64,
 
     pub(crate) input_state: TextInputState,
 
@@ -117,6 +114,8 @@ pub(crate) struct Shared {
     pub window: Option<Weak<Window>>,
 
     pub(crate) scratch_quads: Vec<GlyphQuad>,
+
+    pub(crate) changed_style_keys: Vec<DefaultKey>,
 }
 
 impl Shared {
@@ -404,7 +403,6 @@ impl Text {
         let default_style_key = styles.insert(StyleInner {
             text_style: original_default_style(),
             text_edit_style: TextEditStyle::default(),
-            version: 0,
         });
 
         let atlas_size = params.atlas_page_size.size(device);
@@ -425,7 +423,6 @@ impl Text {
         Self {
             text_boxes: SlotMap::with_capacity(10),
             text_edits: SlotMap::with_capacity(10),
-            style_version_id_counter: 0,
             input_state: TextInputState::new(),
             mouse_hit_stack: Vec::with_capacity(6),
             scroll_animations: Vec::new(),
@@ -469,6 +466,7 @@ impl Text {
                 cursor_blink_waker: None,
                 window: None,
                 scratch_quads: Vec::new(),
+                changed_style_keys: Vec::new(),
             }),
         }
     }
@@ -553,11 +551,6 @@ impl Text {
         self.shared.render_data.stats()
     }
 
-    pub(crate) fn new_style_version(&mut self) -> u64 {
-        self.style_version_id_counter += 1;
-        self.style_version_id_counter
-    }
-
     /// Add a text box and return a handle.
     /// 
     /// The handle can be used with [`Text::get_text_box()`] to get a reference to the [`TextBox`] that was added.
@@ -574,7 +567,6 @@ impl Text {
         text_box.render_data_info.box_index = box_data_i;
 
         text_box.last_frame_touched = self.current_visibility_frame;
-        text_box.style_version = self.shared.styles[text_box.style.key].version;
         let key = self.text_boxes.insert(text_box);
         let handle = TextBoxHandle { key };
         // Fill in the local copy of the key.
@@ -596,7 +588,6 @@ impl Text {
         text_edit.text_box.render_data_info.box_index = box_data_i;
 
         text_edit.text_box.last_frame_touched = self.current_visibility_frame;
-        text_edit.text_box.style_version = self.shared.styles[text_edit.text_box.style.key].version;
         let key = self.text_edits.insert(text_edit);
         let handle = TextEditHandle { key };
         // Fill in the local copy of the key.
@@ -613,7 +604,6 @@ impl Text {
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
         let mut text_box = TextBox::new(text, pos, size, depth, self.shared.default_style_key, shared_backref);
         text_box.last_frame_touched = self.current_visibility_frame;
-        text_box.style_version = self.shared.styles[text_box.style.key].version;
         text_box.window_id = Some(window_id);
         let key = self.text_boxes.insert(text_box);
         let handle = TextBoxHandle { key };
@@ -631,8 +621,6 @@ impl Text {
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
         let mut text_edit = TextEdit::new(text, pos, size, depth, self.shared.default_style_key, shared_backref);
         text_edit.text_box.last_frame_touched = self.current_visibility_frame;
-        // todo: isn't this always the default style key? 
-        text_edit.text_box.style_version = self.shared.styles[text_edit.text_box.style.key].version;
         text_edit.text_box.window_id = Some(window_id);
         let key = self.text_edits.insert(text_edit);
         let handle = TextEditHandle { key };
@@ -676,11 +664,9 @@ impl Text {
     #[must_use]
     pub fn add_style(&mut self, text_style: TextStyle2, text_edit_style: Option<TextEditStyle>) -> StyleHandle {
         let text_edit_style = text_edit_style.unwrap_or_default();
-        let new_version = self.new_style_version();
         let key = self.shared.styles.insert(StyleInner {
             text_style,
             text_edit_style,
-            version: new_version,
         });
         StyleHandle { key }
     }
@@ -692,7 +678,7 @@ impl Text {
 
     /// Returns a mutable reference to the text style.
     pub fn get_text_style_mut(&mut self, handle: &StyleHandle) -> &mut TextStyle2 {
-        self.shared.styles[handle.key].version = self.new_style_version();
+        self.shared.changed_style_keys.push(handle.key);
         self.shared.rebuild_glyph_quad_buffer = true;
         &mut self.shared.styles[handle.key].text_style
     }
@@ -704,7 +690,7 @@ impl Text {
 
     /// Returns a mutable reference to the text edit style.
     pub fn get_text_edit_style_mut(&mut self, handle: &StyleHandle) -> &mut TextEditStyle {
-        self.shared.styles[handle.key].version = self.new_style_version();
+        self.shared.changed_style_keys.push(handle.key);
         self.shared.rebuild_glyph_quad_buffer = true;
         &mut self.shared.styles[handle.key].text_edit_style
     }
@@ -717,7 +703,7 @@ impl Text {
     /// Returns a mutable reference to the default text style.
     pub fn get_default_text_style_mut(&mut self) -> &mut TextStyle2 {
         let default_style_key = self.shared.default_style_key;
-        self.shared.styles[default_style_key].version = self.new_style_version();
+        self.shared.changed_style_keys.push(default_style_key);
         self.shared.rebuild_glyph_quad_buffer = true;
         &mut self.shared.styles[default_style_key].text_style
     }
@@ -730,7 +716,7 @@ impl Text {
     /// Returns a mutable reference to the default text edit style.
     pub fn get_default_text_edit_style_mut(&mut self) -> &mut TextEditStyle {
         let default_style_key = self.shared.default_style_key;
-        self.shared.styles[default_style_key].version = self.new_style_version();
+        self.shared.changed_style_keys.push(default_style_key);
         self.shared.rebuild_glyph_quad_buffer = true;
         &mut self.shared.styles[default_style_key].text_edit_style
     }
@@ -910,6 +896,9 @@ impl Text {
         // Each box decides internally whether to do a full rebuild or a fast BoxGpu-only update.
         let current_frame = self.current_visibility_frame;
         for (_, text_edit) in self.text_edits.iter_mut() {
+            if self.shared.changed_style_keys.contains(&text_edit.text_box.style.key) {
+                text_edit.text_box.needs_relayout = true;
+            }
             if !text_edit.text_box.hidden() && text_edit.text_box.last_frame_touched == current_frame {
                 self.shared.render_data.prepare_text_edit_layout(text_edit, &mut self.shared.scratch_quads);
             } else {
@@ -918,6 +907,10 @@ impl Text {
         }
 
         for (_, mut text_box) in self.text_boxes.iter_mut() {
+            if self.shared.changed_style_keys.contains(&text_box.style.key) {
+                dbg!("Sneed2");
+                text_box.needs_relayout = true;
+            }
             if !text_box.hidden() && text_box.last_frame_touched == current_frame {
                 self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads);
             } else {
@@ -985,15 +978,12 @@ impl Text {
                 window_info.prepared = false;
             }
 
+            self.shared.changed_style_keys.clear();
+
             self.shared.scrolled = self.get_max_animation_duration().is_some();
         }
     }
 
-    /// Fast path for handling scroll-only changes by adjusting BoxGpu translation.
-    /// Returns false if scroll has exceeded the tolerance from the base position (line culling),
-    /// in which case the caller should fall back to a full re-prepare.
-    /// Handle window events for all text areas in a specific window.
-    /// 
     /// Returns `true` if the event was consumed by a text area.
     pub fn handle_event(&mut self, event: &WindowEvent, window: &Window) -> bool {
         let mut event_consumed = false;

@@ -39,7 +39,6 @@ pub struct TextBox {
     pub(crate) text: Cow<'static, str>,
     pub(crate) text_identity: Option<TextIdentity>,
     pub(crate) style: StyleHandle,
-    pub(crate) style_version: u64,
     pub(crate) layout: Layout<ColorBrush>,
 
     #[cfg(feature = "accessibility")]
@@ -159,7 +158,6 @@ impl TextBox {
         Self {
             text: text.into(),
             text_identity: None,
-            style_version: 0,
             layout: Layout::new(),
             #[cfg(feature = "accessibility")]
             layout_access: LayoutAccessibility::default(),
@@ -1031,17 +1029,8 @@ impl TextBox {
             return;
         }
         self.style = style.sneak_clone();
-        self.style_version = self.style_version();
         self.needs_relayout = true;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
-    }
-
-    pub(crate) fn style_version(&self) -> u64 {
-        self.shared().styles[self.style.key].version
-    }
-
-    pub(crate) fn style_version_changed(&self) -> bool {
-        self.style_version() != self.style_version
     }
 
     pub(crate) fn text_inner(&self) -> &str {
@@ -1462,20 +1451,16 @@ impl TextBox {
     /// Refresh the layout.
     pub fn refresh_layout(&mut self) {
         if self.needs_relayout() {
-            if self.style_version_changed() {
-                self.style_version = self.style_version();
-                // Style changed externally, invalidate cached quads
-            }
             self.shared_mut().rebuild_glyph_quad_buffer = true;
             self.rebuild_layout(None, false);
         }
     }
 
     /// Returns `true` if the text box layout will have to be recomputed because of changes to the text content, size, alignment, font size, etc.
-    /// 
+    ///
     /// The layout will automatically be recomputed when preparing the text for render, or when calling [TextBox::layout()].
     pub fn needs_relayout(&mut self) -> bool {
-        return self.needs_relayout || self.style_version_changed();
+        return self.needs_relayout;
     }
 
     /// Sets whether the text is selectable.

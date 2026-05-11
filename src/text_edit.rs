@@ -1336,13 +1336,6 @@ impl TextEdit {
 }
 
 impl TextEdit {
-    pub(crate) fn style_version(&self) -> u64 {
-        self.text_box.shared().styles[self.text_box.style.key].version
-    }
-
-    pub(crate) fn style_version_changed(&self) -> bool {
-        self.style_version() != self.text_box.style_version
-    }
 
     /// Returns a mutable reference to the text content.
     pub fn raw_text_mut(&mut self) -> &mut String {
@@ -1529,10 +1522,6 @@ impl TextEdit {
         };
 
         if self.text_box.needs_relayout() {
-            if self.style_version_changed() {
-                self.text_box.style_version = self.style_version();
-
-            }
             self.text_box.shared_mut().rebuild_glyph_quad_buffer = true;
             self.text_box.rebuild_layout(color_override, self.single_line);
         }

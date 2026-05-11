@@ -568,12 +568,10 @@ impl RenderData {
             group_transform_index
         );
 
-        if !text_box.needs_quad_rebuild && text_box.render_data_info.glyph_quad_handle.is_some() {
+        if ! text_box.needs_quad_rebuild && text_box.render_data_info.glyph_quad_handle.is_some() {
             // Fast path: quads are still valid, BoxGpu already updated above.
             return;
         }
-
-        // Full rebuild: walk the layout and write new quads to the heap.
         let quads = scratch;
         quads.clear();
 
