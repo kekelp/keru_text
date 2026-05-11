@@ -76,7 +76,8 @@ impl State {
         
         // Create header text box
         let header = text.add_text_box(
-            "This is an informal benchmark for the library and for the atlas renderer.\n\
+            "Warning: this is all outdated! The library is now much more incremental.
+            This is an informal benchmark for the library and for the atlas renderer.\n\
             The first frame is very slow because of cpu-side glyph rasterization. In the following frames, the glyphs are cached in the atlases.\n\
             If you go really hard with ctrl+v on one of the text edit boxes, you'll quickly see the other limitation. Rendering can efficiently skip the text that's outside the clip area (or the screen), but the layouting and shaping can't.\n\n\
             \

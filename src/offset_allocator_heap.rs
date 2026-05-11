@@ -82,7 +82,7 @@ impl<T: Default + Clone> OffsetHeap<T> {
         &mut self.vec[start..start + size]
     }
 
-    pub fn get(&self, handle: Handle) -> &[T] {
+    pub fn _get(&self, handle: Handle) -> &[T] {
         let start = handle.vec_index(CHUNK_SIZE);
         let size = handle.size as usize;
         &self.vec[start..start + size]
@@ -92,7 +92,7 @@ impl<T: Default + Clone> OffsetHeap<T> {
         &self.vec
     }
 
-    pub fn as_slice_mut(&mut self) -> &mut [T] {
+    pub fn _as_slice_mut(&mut self) -> &mut [T] {
         &mut self.vec
     }
 }

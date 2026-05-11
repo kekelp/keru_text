@@ -48,8 +48,8 @@ pub(crate) struct RenderData {
     pub(crate) needs_texture_array_rebuild: bool,
     pub(crate) needs_params_sync: bool,
 
-    /// Index of the cursor quad in glyph_quads, if any. Used for cursor-blink-only updates.
-    pub(crate) cursor_quad_index: Option<usize>,
+    /// Handle into the glyph quad heap for the current frame's decoration quads (selections + cursor).
+    pub(crate) decoration_quad_handle: Option<Handle>,
 
     pub(crate) scale_cx: Option<ScaleContext>,
 
@@ -362,6 +362,24 @@ impl UselessTrait2 for Placement {
     }
 }
 
+pub(crate) fn make_decoration_quad(rect: BoundingBox, color: u32, box_index: u32) -> GlyphQuad {
+    let x0 = rect.x0 as i32;
+    let x1 = rect.x1 as i32;
+    let y0 = rect.y0 as i32;
+    let y1 = rect.y1 as i32;
+
+    GlyphQuad {
+        pos_packed: pack_i32_pair_as_u16(x0, y0),
+        dim_packed: pack_u16_pair((x1 - x0) as u32, (y1 - y0) as u32),
+        uv_origin_packed: pack_u16_pair(0, 0),
+        color,
+        flags_and_page: pack_flags_and_page(CONTENT_TYPE_DECORATION, 0),
+        box_index,
+        _padding1: 0,
+        _padding2: 0,
+    }
+}
+
 impl RenderData {
     /// Create a new RenderData with a specific atlas size.
     pub fn new(device: &wgpu::Device, atlas_size: u32) -> Self {
@@ -404,7 +422,7 @@ impl RenderData {
             atlas_size,
             needs_texture_array_rebuild: false,
             needs_params_sync: true,
-            cursor_quad_index: None,
+            decoration_quad_handle: None,
             scale_cx: Some(ScaleContext::new()),
             #[cfg(debug_assertions)]
             stats: RenderStats::default(),
@@ -449,22 +467,11 @@ impl RenderData {
         self.last_frame_evicted != current_frame
     }
 
-    fn make_selection_rect(&mut self, rect: BoundingBox, color: u32, box_index: u32) -> Option<GlyphQuad> {
-        let x0 = rect.x0 as i32;
-        let x1 = rect.x1 as i32;
-        let y0 = rect.y0 as i32;
-        let y1 = rect.y1 as i32;
-
-        return Some(GlyphQuad {
-            pos_packed: pack_i32_pair_as_u16(x0, y0),
-            dim_packed: pack_u16_pair((x1 - x0) as u32, (y1 - y0) as u32),
-            uv_origin_packed: pack_u16_pair(0, 0),
-            color,
-            flags_and_page: pack_flags_and_page(CONTENT_TYPE_DECORATION, 0),
-            box_index,
-            _padding1: 0,
-            _padding2: 0,
-        });
+    /// Zero out and free the shared decoration quad heap allocation.
+    pub(crate) fn release_decoration_quads(&mut self) {
+        if let Some(handle) = self.decoration_quad_handle.take() {
+            self.glyph_quads.free_and_clear(handle);
+        }
     }
 
     /// Advance the frame counter.
@@ -516,11 +523,10 @@ impl RenderData {
         if had_relayout { self.stats.relayouts += 1; }
         if had_relayout { text_edit.text_box.needs_quad_rebuild = true; }
 
-        let focused = text_edit.text_box.shared().focused == Some(AnyBox::TextEdit(text_edit.text_box.key));
-        self.prepare_text_box_layout(&mut text_edit.text_box, focused, focused, scratch);
+        self.prepare_text_box_layout(&mut text_edit.text_box, scratch);
     }
 
-    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, show_cursor: bool, show_selection: bool, scratch: &mut Vec<GlyphQuad>) {
+    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, scratch: &mut Vec<GlyphQuad>) {
         let w = self.params.screen_resolution_width;
         let h = self.params.screen_resolution_height;
         let t = text_box.transform.translation;
@@ -601,38 +607,13 @@ impl RenderData {
 
         text_box.render_data_info.base_scroll = scroll_offset;
 
-        if show_selection {
-            let selection_color = 0x33_33_ff_aa;
-            text_box.selection().geometry_with(&text_box.layout, |rect, _line_i| {
-                if let Some(q) = self.make_selection_rect(rect, selection_color, box_index as u32) {
-                    quads.push(q);
-                }
-            });
-        }
-
-        let show_cursor = show_cursor && text_box.selection().is_collapsed();
-        let cursor_pos_in_quads: Option<usize> = if show_cursor {
-            let cursor_rect = text_box.selection().focus().geometry(&text_box.layout, CURSOR_WIDTH);
-            if let Some(q) = self.make_selection_rect(cursor_rect, CURSOR_COLOR, box_index as u32) {
-                let pos = quads.len();
-                quads.push(q);
-                Some(pos)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
         // Free old allocation and replace with the new quads.
         self.release_glyph_quads(&mut text_box.render_data_info);
 
-        if ! quads.is_empty() {
+        if !quads.is_empty() {
             if let Some(handle) = self.glyph_quads.allocate(quads.len() as u32) {
-                let base_index = handle.vec_index(CHUNK_SIZE);
-                self.glyph_quads.get_mut(handle).copy_from_slice(&quads);
                 text_box.render_data_info.glyph_quad_handle = Some(handle);
-                self.cursor_quad_index = cursor_pos_in_quads.map(|p| base_index + p);
+                self.glyph_quads.get_mut(handle).copy_from_slice(&quads);
             }
         }
 

@@ -46,8 +46,8 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
         self.heap.get_mut(handle)
     }
 
-    pub fn get(&mut self, handle: Handle) -> &[T] {
-        self.heap.get(handle)
+    pub fn _get(&mut self, handle: Handle) -> &[T] {
+        self.heap._get(handle)
     }
 
     /// Updates the underlying gpu buffer with the heap's backing slice.
@@ -116,11 +116,11 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
         self.need_gpu_sync
     }
 
-    pub fn as_slice_mut(&mut self) -> &mut [T] {
-        self.heap.as_slice_mut()
+    pub fn _as_slice_mut(&mut self) -> &mut [T] {
+        self.heap._as_slice_mut()
     }
 
-    pub fn as_slice(&self) -> &[T] {
+    pub fn _as_slice(&self) -> &[T] {
         self.heap.as_slice()
     }
 }

@@ -518,35 +518,15 @@ impl Text {
             self.renderer.update_texture_arrays(&mut self.shared.render_data);
         }
 
-        // Update cursor color if needed
-        let glyph_quads = &mut self.shared.render_data.glyph_quads;
-        if self.shared.rerender_cursor {
-            if let Some(cursor_index) = self.shared.render_data.cursor_quad_index {
-                let color = if self.shared.cursor_blink_animation_currently_visible {
-                    CURSOR_COLOR
-                } else {
-                    0x00_00_00_00
-                };
-                glyph_quads.as_slice_mut()[cursor_index].color = color;
-            }
-        }
-
         // Sync quads buffer
+        let glyph_quads = &mut self.shared.render_data.glyph_quads;
         if glyph_quads.needs_gpu_sync() {
-            // Normal sync
             let glyph_quads_reallocated = glyph_quads.load_to_gpu(
                 &self.renderer.device,
                 &self.renderer.queue,
             );
             if glyph_quads_reallocated {
                 needs_bind_group_recreate = true;
-            }
-        } else if self.shared.rerender_cursor {
-            // Do a small sync for just the blinking cursor
-            if let Some(cursor_index) = self.shared.render_data.cursor_quad_index {
-                let bytes: &[u8] = bytemuck::cast_slice(std::slice::from_ref(&glyph_quads.as_slice()[cursor_index]));
-                let offset = (cursor_index * std::mem::size_of::<GlyphQuad>()) as u64;
-                self.renderer.queue.write_buffer(glyph_quads.buffer(), offset, bytes);
             }
         }
         self.shared.rerender_cursor = false;
@@ -929,7 +909,7 @@ impl Text {
 
         // Each box decides internally whether to do a full rebuild or a fast BoxGpu-only update.
         let current_frame = self.current_visibility_frame;
-        for (_key, text_edit) in self.text_edits.iter_mut() {
+        for (_, text_edit) in self.text_edits.iter_mut() {
             if !text_edit.text_box.hidden() && text_edit.text_box.last_frame_touched == current_frame {
                 self.shared.render_data.prepare_text_edit_layout(text_edit, &mut self.shared.scratch_quads);
             } else {
@@ -937,12 +917,54 @@ impl Text {
             }
         }
 
-        for (key, mut text_box) in self.text_boxes.iter_mut() {
+        for (_, mut text_box) in self.text_boxes.iter_mut() {
             if !text_box.hidden() && text_box.last_frame_touched == current_frame {
-                let show_selection = self.shared.multi_box_selection.contains(&key);
-                self.shared.render_data.prepare_text_box_layout(&mut text_box, false, show_selection, &mut self.shared.scratch_quads);
+                self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads);
             } else {
                 self.shared.render_data.release_glyph_quads(&mut text_box.render_data_info);
+            }
+        }
+
+        // Decoration quads: selection rects and cursor, done once for all boxes.
+        {
+            self.shared.render_data.release_decoration_quads();
+
+            let scratch = &mut self.shared.scratch_quads;
+            scratch.clear();
+            let selection_color = 0x33_33_ff_aa;
+
+            for &key in &self.shared.multi_box_selection {
+                if let Some(text_box) = self.text_boxes.get(key) {
+                    let box_index = text_box.render_data_info.box_index as u32;
+                    text_box.selection().geometry_with(&text_box.layout, |rect, _| {
+                        scratch.push(make_decoration_quad(rect, selection_color, box_index));
+                    });
+                }
+            }
+
+            if let Some(AnyBox::TextEdit(key)) = self.shared.focused {
+                if let Some(text_edit) = self.text_edits.get(key) {
+                    let text_box = &text_edit.text_box;
+                    let box_index = text_box.render_data_info.box_index as u32;
+
+                    text_box.selection().geometry_with(&text_box.layout, |rect, _| {
+                        scratch.push(make_decoration_quad(rect, selection_color, box_index));
+                    });
+
+                    if text_box.selection().is_collapsed() {
+                        let cursor_color = if self.shared.cursor_blink_animation_currently_visible { CURSOR_COLOR } else { 0x00_00_00_00 };
+                        let cursor_rect = text_box.selection().focus().geometry(&text_box.layout, CURSOR_WIDTH);
+                        scratch.push(make_decoration_quad(cursor_rect, cursor_color, box_index));
+                    }
+                }
+            }
+
+            let scratch = &self.shared.scratch_quads;
+            if !scratch.is_empty() {
+                if let Some(handle) = self.shared.render_data.glyph_quads.allocate(scratch.len() as u32) {
+                    self.shared.render_data.glyph_quads.get_mut(handle).copy_from_slice(scratch);
+                    self.shared.render_data.decoration_quad_handle = Some(handle);
+                }
             }
         }
 
