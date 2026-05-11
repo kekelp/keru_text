@@ -147,7 +147,7 @@ impl TextBox {
         pos: (f64, f64),
         size: (f32, f32),
         depth: f32,
-        default_style_key: DefaultKey,
+        default_style_key: usize,
         shared_backref: NonNull<Shared>,
     ) -> Self {
         let position = Transform2D {

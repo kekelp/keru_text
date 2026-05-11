@@ -66,13 +66,11 @@ impl State {
             ..Default::default()
         }, None);
 
-        let small_style = text.add_style(TextStyle {
+        *text.get_default_text_style_mut() = TextStyle {
             font_size: 16.0,
             brush: ColorBrush([255, 255, 255, 255]),
             ..Default::default()
-        }, None);
-
-        text.set_default_style(&small_style);
+        };
         
         // Create header text box
         let header = text.add_text_box(

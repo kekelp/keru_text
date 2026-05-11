@@ -3,7 +3,6 @@ use std::{
 };
 
 use parley::*;
-use slotmap::DefaultKey;
 use winit::{
     event::{Ime, Touch, WindowEvent}, keyboard::{Key, NamedKey}, platform::modifier_supplement::KeyEventExtModifierSupplement, window::Window
 };
@@ -142,7 +141,7 @@ pub(crate) enum ScrollDirection {
 }
 
 impl TextEdit {
-    pub(crate) fn new(text: String, pos: (f64, f64), size: (f32, f32), depth: f32, default_style_key: DefaultKey, shared_backref: NonNull<Shared>) -> Self {
+    pub(crate) fn new(text: String, pos: (f64, f64), size: (f32, f32), depth: f32, default_style_key: usize, shared_backref: NonNull<Shared>) -> Self {
         let mut text_box = TextBox::new(text, pos, size, depth, default_style_key, shared_backref);
         text_box.auto_clip = true;
         return Self {

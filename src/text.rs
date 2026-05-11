@@ -2,6 +2,7 @@ use crate::*;
 #[cfg(feature = "accessibility")]
 use accesskit::{NodeId, TreeUpdate};
 use slotmap::{SlotMap, DefaultKey};
+use slab::Slab;
 #[cfg(feature = "accessibility")]
 use std::collections::HashMap;
 use std::ops::DerefMut;
@@ -14,6 +15,8 @@ use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
 use std::sync::{Arc, Weak};
 use winit::window::WindowId;
 use parley::{FontContext, LayoutContext};
+
+const DEFAULT_STYLE_KEY: usize = 0;
 
 const MULTICLICK_DELAY: f64 = 0.4;
 const MULTICLICK_TOLERANCE_SQUARED: f64 = 26.0;
@@ -71,8 +74,7 @@ pub struct Text {
 pub(crate) struct Shared {
     pub(crate) render_data: RenderData,
 
-    pub styles: SlotMap<DefaultKey, StyleInner>,
-    pub default_style_key: DefaultKey,
+    pub styles: Slab<StyleInner>,
     pub rebuild_glyph_quad_buffer: bool,
     pub scrolled: bool,
     pub focused: Option<AnyBox>,
@@ -115,7 +117,7 @@ pub(crate) struct Shared {
 
     pub(crate) scratch_quads: Vec<GlyphQuad>,
 
-    pub(crate) changed_style_keys: Vec<DefaultKey>,
+    pub(crate) changed_style_keys: Vec<usize>,
 }
 
 impl Shared {
@@ -258,7 +260,7 @@ impl Drop for TextBoxHandle {
 /// Handle for a text style. Use with Text methods to apply styles to text.
 #[derive(Debug, Clone, Copy)]
 pub struct StyleHandle {
-    pub(crate) key: DefaultKey,
+    pub(crate) key: usize,
 }
 impl StyleHandle {
     pub(crate) fn sneak_clone(&self) -> Self {
@@ -399,11 +401,12 @@ impl Text {
         depth_stencil: Option<DepthStencilState>,
         params: TextRendererParams,
     ) -> Self {
-        let mut styles = SlotMap::with_capacity_and_key(10);
-        let default_style_key = styles.insert(StyleInner {
+        let mut styles = Slab::with_capacity(10);
+        let key = styles.insert(StyleInner {
             text_style: original_default_style(),
             text_edit_style: TextEditStyle::default(),
         });
+        debug_assert_eq!(key, DEFAULT_STYLE_KEY);
 
         let atlas_size = params.atlas_page_size.size(device);
         let mut render_data = RenderData::new(device, atlas_size);
@@ -439,7 +442,6 @@ impl Text {
                 render_data,
                 windows: Vec::with_capacity(1),
                 styles,
-                default_style_key,
                 rebuild_glyph_quad_buffer: true,
                 scrolled: true,
                 focused: None,
@@ -561,7 +563,7 @@ impl Text {
     #[must_use]
     pub fn add_text_box(&mut self, text: impl Into<Cow<'static, str>>, pos: (f64, f64), size: (f32, f32), depth: f32) -> TextBoxHandle {
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
-        let mut text_box = TextBox::new(text, pos, size, depth, self.shared.default_style_key, shared_backref);
+        let mut text_box = TextBox::new(text, pos, size, depth, DEFAULT_STYLE_KEY, shared_backref);
 
         let box_data_i = self.shared.render_data.box_data.insert(BoxGpu::zeroed());
         text_box.render_data_info.box_index = box_data_i;
@@ -582,7 +584,7 @@ impl Text {
     #[must_use]
     pub fn add_text_edit(&mut self, text: String, pos: (f64, f64), size: (f32, f32), depth: f32) -> TextEditHandle {
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
-        let mut text_edit = TextEdit::new(text, pos, size, depth, self.shared.default_style_key, shared_backref);
+        let mut text_edit = TextEdit::new(text, pos, size, depth, DEFAULT_STYLE_KEY, shared_backref);
 
         let box_data_i = self.shared.render_data.box_data.insert(BoxGpu::zeroed());
         text_edit.text_box.render_data_info.box_index = box_data_i;
@@ -602,7 +604,7 @@ impl Text {
     #[must_use]
     pub fn add_text_box_for_window(&mut self, text: impl Into<Cow<'static, str>>, pos: (f64, f64), size: (f32, f32), depth: f32, window_id: WindowId) -> TextBoxHandle {
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
-        let mut text_box = TextBox::new(text, pos, size, depth, self.shared.default_style_key, shared_backref);
+        let mut text_box = TextBox::new(text, pos, size, depth, DEFAULT_STYLE_KEY, shared_backref);
         text_box.last_frame_touched = self.current_visibility_frame;
         text_box.window_id = Some(window_id);
         let key = self.text_boxes.insert(text_box);
@@ -619,7 +621,7 @@ impl Text {
     #[must_use]
     pub fn add_text_edit_for_window(&mut self, text: String, pos: (f64, f64), size: (f32, f32), depth: f32, window_id: WindowId) -> TextEditHandle {
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
-        let mut text_edit = TextEdit::new(text, pos, size, depth, self.shared.default_style_key, shared_backref);
+        let mut text_edit = TextEdit::new(text, pos, size, depth, DEFAULT_STYLE_KEY, shared_backref);
         text_edit.text_box.last_frame_touched = self.current_visibility_frame;
         text_edit.text_box.window_id = Some(window_id);
         let key = self.text_edits.insert(text_edit);
@@ -697,12 +699,12 @@ impl Text {
 
     /// Returns a reference to the default text style.
     pub fn get_default_text_style(&self) -> &TextStyle2 {
-        &self.shared.styles[self.shared.default_style_key].text_style
+        &self.shared.styles[DEFAULT_STYLE_KEY].text_style
     }
 
     /// Returns a mutable reference to the default text style.
     pub fn get_default_text_style_mut(&mut self) -> &mut TextStyle2 {
-        let default_style_key = self.shared.default_style_key;
+        let default_style_key = DEFAULT_STYLE_KEY;
         self.shared.changed_style_keys.push(default_style_key);
         self.shared.rebuild_glyph_quad_buffer = true;
         &mut self.shared.styles[default_style_key].text_style
@@ -710,12 +712,12 @@ impl Text {
 
     /// Returns a reference to the default text edit style.
     pub fn get_default_text_edit_style(&self) -> &TextEditStyle {
-        &self.shared.styles[self.shared.default_style_key].text_edit_style
+        &self.shared.styles[DEFAULT_STYLE_KEY].text_edit_style
     }
 
     /// Returns a mutable reference to the default text edit style.
     pub fn get_default_text_edit_style_mut(&mut self) -> &mut TextEditStyle {
-        let default_style_key = self.shared.default_style_key;
+        let default_style_key = DEFAULT_STYLE_KEY;
         self.shared.changed_style_keys.push(default_style_key);
         self.shared.rebuild_glyph_quad_buffer = true;
         &mut self.shared.styles[default_style_key].text_edit_style
@@ -2223,12 +2225,6 @@ impl Text {
         let family_id = families.first()?.0;
         let family = self.shared.font_cx.collection.family(family_id)?;
         Some(family.name().to_string())
-    }
-
-    /// Set an inserted style as the default style.
-    pub fn set_default_style(&mut self, style: &StyleHandle) {
-        self.shared.default_style_key = style.key;
-        // todo set needs relayout?
     }
 
     #[cfg(feature = "accessibility")]
