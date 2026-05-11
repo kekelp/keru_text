@@ -75,29 +75,7 @@
 //! For any `winit::WindowEvent` other than a `winit::WindowEvent::MouseInput` or a `winit::WindowEvent::MouseWheel`, this process can be skipped, and you can just call [`Text::handle_event()`] normallyw.
 //! 
 //! The `occlusion.rs` example shows how this works.
-//! 
-//! ## Declarative Visibility
-//! 
-//! There is an optional declarative interface for hiding text boxes:
-//! 
-//! ```no_run
-//! # use keru_text::*;
-//! # let mut text = Text::new();
-//! // Each frame, advance an internal frame counter,
-//! // and implicitly mark all text boxes as "outdated"
-//! text.advance_frame_and_hide_boxes();
-//! 
-//! # struct Node { text_box_handle: TextBoxHandle }
-//! # let current_nodes: Vec<Node> = Vec::new();
-//! // "Refresh" only the nodes that should remain visible
-//! for node in current_nodes {
-//!     text.refresh_text_box(&node.text_box_handle);
-//! }
-//! 
-//! // Text boxes that were not refreshed will be remain hidden,
-//! // and they will be skipped when rendering or handling events.
-//! ```
-//! 
+//!
 //! This library was written for use in Keru, which is a declarative library that diffs node trees, so it uses imperative-mode calls to remove widgets. However, it uses the declarative interface for hiding text boxes that need to be kept hidden in the background.
 //! 
 //! ## Advanced rendering

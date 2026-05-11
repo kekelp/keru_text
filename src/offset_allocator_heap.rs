@@ -34,8 +34,8 @@ pub struct OffsetHeap<T> {
 impl<T: Default + Clone> OffsetHeap<T> {
     pub fn new() -> Self {
         Self {
-            vec: Vec::new(),
-            chunks: Vec::new(),
+            vec: Vec::with_capacity(CHUNK_SIZE as usize / 4),
+            chunks: Vec::with_capacity(1),
         }
     }
 

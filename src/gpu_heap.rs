@@ -9,6 +9,7 @@ pub struct GpuHeap<T: Copy + Default + Clone> {
     label: String,
     need_gpu_sync: bool,
     usage: wgpu::BufferUsages,
+    watermark: usize,
 }
 
 impl<T: Copy + Default + Clone> GpuHeap<T> {
@@ -27,6 +28,7 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
             label: label.to_string(),
             need_gpu_sync: false,
             usage,
+            watermark: 0,
         }
     }
 
@@ -58,6 +60,10 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
                 self.free_and_clear(h);
             }
             *handle = self.heap.allocate(data.len() as u32);
+            if let Some(h) = *handle {
+                let end = h.vec_index(crate::offset_allocator_heap::CHUNK_SIZE) + h.size as usize;
+                self.watermark = self.watermark.max(end);
+            }
         }
 
         if let Some(h) = *handle {
@@ -91,8 +97,10 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
             });
         }
 
-        if !data.is_empty() {
-            let size = data.len() * size_of::<T>();
+        let write_len = self.watermark.min(data.len());
+        dbg!(write_len);
+        if write_len > 0 {
+            let size = write_len * size_of::<T>();
             queue.write_buffer(&self.buffer, 0, unsafe {
                 std::slice::from_raw_parts(data.as_ptr() as *const u8, size)
             });

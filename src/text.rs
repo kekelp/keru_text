@@ -528,7 +528,7 @@ impl Text {
             text_boxes: Slab::with_capacity(10),
             text_edits: Slab::with_capacity(10),
             input_state: TextInputState::new(),
-            scroll_animations: Vec::new(),
+            scroll_animations: Vec::with_capacity(4),
             renderer,
 
             #[cfg(feature = "accessibility")]
@@ -543,7 +543,7 @@ impl Text {
                 hit_tests: Slab::with_capacity(10),
                 scrolled: true,
                 focused: None,
-                multi_box_selection: Vec::new(),
+                multi_box_selection: Vec::with_capacity(4),
                 cross_box_selection_anchor: None,
                 cross_box_cursor_key: None,
                 layout_cx: LayoutContext::new(),
@@ -557,7 +557,7 @@ impl Text {
                 node_id_generator: crate::accessibility::next_node_id,
                 #[cfg(feature = "accessibility")]
                 accesskit_tree_update: TreeUpdate {
-                    nodes: Vec::new(),
+                    nodes: Vec::with_capacity(4),
                     tree: None,
                     focus: NodeId(0),
                 },
@@ -565,8 +565,8 @@ impl Text {
                 cursor_blink_animation_currently_visible: false,
                 cursor_blink_waker: None,
                 window: None,
-                scratch_quads: Vec::new(),
-                changed_style_keys: Vec::new(),
+                scratch_quads: Vec::with_capacity(40),
+                changed_style_keys: Vec::with_capacity(2),
             }),
         }
     }
