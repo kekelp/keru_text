@@ -657,7 +657,7 @@ impl Text {
     /// Only available in debug builds.
     #[cfg(debug_assertions)]
     pub fn render_stats(&self) -> &RenderStats {
-        self.shared.render_data.stats()
+        &self.shared.render_data.stats
     }
 
     /// Add a text box and return a handle.

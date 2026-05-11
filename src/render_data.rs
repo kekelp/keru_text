@@ -479,12 +479,6 @@ impl RenderData {
         }
     }
 
-    /// Get the render stats from the last frame. Only available in debug builds.
-    #[cfg(debug_assertions)]
-    pub fn stats(&self) -> &RenderStats {
-        &self.stats
-    }
-
     /// Update the screen resolution in the render data.
     pub fn update_resolution(&mut self, width: f32, height: f32) {
         if self.params.screen_resolution_width != width || self.params.screen_resolution_height != height {
