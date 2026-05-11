@@ -467,20 +467,15 @@ impl RenderData {
         });
     }
 
-    /// Advance the frame counter and reset per-frame state.
-    pub fn clear(&mut self) {
+    /// Advance the frame counter.
+    pub fn advance_frame(&mut self) {
         self.frame += 1;
-        self.cursor_quad_index = None;
     }
 
     /// Zero out and free a text box's glyph quad heap allocation.
     pub(crate) fn release_glyph_quads(&mut self, info: &mut RenderDataInfo) {
         if let Some(handle) = info.glyph_quad_handle.take() {
-            let count = info.glyph_quad_count as usize;
-            self.glyph_quads.heap.get_mut(handle, count).fill(GlyphQuad::zeroed());
-            self.glyph_quads.heap.free(handle);
-            self.glyph_quads.dirty = true;
-            info.glyph_quad_count = 0;
+            self.glyph_quads.free_and_clear(handle);
         }
     }
 
@@ -499,29 +494,11 @@ impl RenderData {
         }
     }
 
-    /// Adjust BoxGpu for scroll fast path: updates scroll_offset and clip_rect.
-    pub fn adjust_box_for_scroll(&mut self, box_index: usize, delta_x: f32, delta_y: f32) {
-        let box_data = self.box_data.get_mut(box_index);
-        box_data.scroll_offset[0] += delta_x;
-        box_data.scroll_offset[1] += delta_y;
-        // clip_rect is in layout-local coordinates, so it also moves with scroll
-        box_data.clip_rect_x[0] += delta_x;
-        box_data.clip_rect_x[1] += delta_x;
-        box_data.clip_rect_y[0] += delta_y;
-        box_data.clip_rect_y[1] += delta_y;
-    }
-
     /// Prepare a text edit layout for rendering with scrolling and clipping support.
     pub fn prepare_text_edit_layout(&mut self, text_edit: &mut TextEdit, scratch: &mut Vec<GlyphQuad>) {
         if text_edit.hidden() || text_edit.text_box.offscreen {
-            #[cfg(debug_assertions)] {
-                self.stats.boxes_skipped += 1;
-            }
             self.release_glyph_quads(&mut text_edit.text_box.render_data_info);
             return;
-        }
-        #[cfg(debug_assertions)] {
-            self.stats.boxes_prepared += 1;
         }
 
         // Update scroll to ensure cursor is visible before rendering
@@ -533,10 +510,11 @@ impl RenderData {
             text_edit.needs_scroll_update = false;
         }
 
-        let needs_relayout = text_edit.text_box.needs_relayout();
+        let had_relayout = text_edit.text_box.needs_relayout();
         text_edit.refresh_layout();
         #[cfg(debug_assertions)]
-        if needs_relayout { self.stats.relayouts += 1; }
+        if had_relayout { self.stats.relayouts += 1; }
+        if had_relayout { text_edit.text_box.needs_quad_rebuild = true; }
 
         let focused = text_edit.text_box.shared().focused == Some(AnyBox::TextEdit(text_edit.text_box.key));
         self.prepare_text_box_layout(&mut text_edit.text_box, focused, focused, scratch);
@@ -556,18 +534,25 @@ impl RenderData {
         }
         #[cfg(debug_assertions)]
         { self.stats.boxes_prepared += 1; }
-        let needs_relayout = text_box.needs_relayout();
+
+        let had_relayout = text_box.needs_relayout();
         text_box.refresh_layout();
         #[cfg(debug_assertions)]
-        if needs_relayout { self.stats.relayouts += 1; }
+        if had_relayout { self.stats.relayouts += 1; }
+        if had_relayout { text_box.needs_quad_rebuild = true; }
+
+        if text_box.is_scroll_distance_above_tolerance() {
+            text_box.needs_quad_rebuild = true;
+        }
 
         let clip_rect = text_box.effective_clip_rect();
         let screen_clip = text_box.screen_space_clip_rect;
         let scroll_offset = text_box.scroll_offset();
 
-        // Update BoxGpu
         let box_index = text_box.render_data_info.box_index;
         let group_transform_index = text_box.group_transform_index.map(|h| h.0 as u32).unwrap_or(0);
+
+        // Always update BoxGpu so position/scroll/clip changes are reflected immediately.
         *self.box_data.get_mut(box_index) = create_box_data(
             clip_rect,
             scroll_offset,
@@ -577,7 +562,12 @@ impl RenderData {
             group_transform_index
         );
 
-        // Build all quads into the scratch buffer, then write to the heap.
+        if !text_box.needs_quad_rebuild && text_box.render_data_info.glyph_quad_handle.is_some() {
+            // Fast path: quads are still valid, BoxGpu already updated above.
+            return;
+        }
+
+        // Full rebuild: walk the layout and write new quads to the heap.
         let quads = scratch;
         quads.clear();
 
@@ -610,7 +600,6 @@ impl RenderData {
         }
 
         text_box.render_data_info.base_scroll = scroll_offset;
-        text_box.render_data_info.last_scroll = scroll_offset;
 
         if show_selection {
             let selection_color = 0x33_33_ff_aa;
@@ -638,16 +627,16 @@ impl RenderData {
         // Free old allocation and replace with the new quads.
         self.release_glyph_quads(&mut text_box.render_data_info);
 
-        if !quads.is_empty() {
-            if let Some(handle) = self.glyph_quads.heap.allocate(quads.len() as u32) {
+        if ! quads.is_empty() {
+            if let Some(handle) = self.glyph_quads.allocate(quads.len() as u32) {
                 let base_index = handle.vec_index(CHUNK_SIZE);
-                self.glyph_quads.heap.get_mut(handle, quads.len()).copy_from_slice(&quads);
-                self.glyph_quads.dirty = true;
+                self.glyph_quads.get_mut(handle).copy_from_slice(&quads);
                 text_box.render_data_info.glyph_quad_handle = Some(handle);
-                text_box.render_data_info.glyph_quad_count = quads.len() as u32;
                 self.cursor_quad_index = cursor_pos_in_quads.map(|p| base_index + p);
             }
         }
+
+        text_box.needs_quad_rebuild = false;
     }
 
     fn prepare_glyph_run_into(

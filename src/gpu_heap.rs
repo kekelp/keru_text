@@ -3,11 +3,11 @@ use std::mem::size_of;
 use crate::offset_allocator_heap::{Handle, OffsetHeap};
 
 pub struct GpuHeap<T: Copy + Default + Clone> {
-    pub(crate) heap: OffsetHeap<T>,
-    pub(crate) buffer: wgpu::Buffer,
+    heap: OffsetHeap<T>,
+    buffer: wgpu::Buffer,
     buffer_capacity: usize,
     label: String,
-    pub(crate) dirty: bool,
+    need_gpu_sync: bool,
     usage: wgpu::BufferUsages,
 }
 
@@ -25,35 +25,35 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
             buffer_capacity: capacity,
             heap: OffsetHeap::new(),
             label: label.to_string(),
-            dirty: false,
+            need_gpu_sync: false,
             usage,
         }
     }
 
     pub fn allocate(&mut self, size: u32) -> Option<Handle> {
         let handle = self.heap.allocate(size)?;
-        self.dirty = true;
         Some(handle)
     }
 
-    pub fn free(&mut self, handle: Handle) {
+    pub fn free_and_clear(&mut self, handle: Handle) {
+        self.heap.get_mut(handle).fill(T::default());
         self.heap.free(handle);
-        self.dirty = true;
+        self.need_gpu_sync = true;
     }
 
-    pub fn get(&self, handle: Handle, size: usize) -> &[T] {
-        self.heap.get(handle, size)
+    pub fn get_mut(&mut self, handle: Handle) -> &mut [T] {
+        self.need_gpu_sync = true;
+        self.heap.get_mut(handle)
     }
 
-    pub fn get_mut(&mut self, handle: Handle, size: usize) -> &mut [T] {
-        self.dirty = true;
-        self.heap.get_mut(handle, size)
+    pub fn get(&mut self, handle: Handle) -> &[T] {
+        self.heap.get(handle)
     }
 
     /// Updates the underlying gpu buffer with the heap's backing slice.
     /// Returns true if the buffer was reallocated.
     pub fn load_to_gpu(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
-        if !self.dirty {
+        if !self.need_gpu_sync {
             return false;
         }
 
@@ -76,7 +76,7 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
             });
         }
 
-        self.dirty = false;
+        self.need_gpu_sync = false;
         should_realloc
     }
 
@@ -110,5 +110,17 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
 
     pub fn len(&self) -> usize {
         self.heap.as_slice().len()
+    }
+
+    pub fn needs_gpu_sync(&self) -> bool {
+        self.need_gpu_sync
+    }
+
+    pub fn as_slice_mut(&mut self) -> &mut [T] {
+        self.heap.as_slice_mut()
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        self.heap.as_slice()
     }
 }

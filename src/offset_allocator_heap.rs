@@ -10,6 +10,7 @@ pub const CHUNK_SIZE: u32 = 2048;
 pub struct Handle {
     pub chunk_index: u32,
     pub allocation: Allocation,
+    pub size: u32,
 }
 
 impl Handle {
@@ -48,6 +49,7 @@ impl<T: Default + Clone> OffsetHeap<T> {
                 return Some(Handle {
                     chunk_index: i as u32,
                     allocation,
+                    size,
                 });
             }
         }
@@ -66,6 +68,7 @@ impl<T: Default + Clone> OffsetHeap<T> {
         Some(Handle {
             chunk_index,
             allocation,
+            size,
         })
     }
 
@@ -73,16 +76,16 @@ impl<T: Default + Clone> OffsetHeap<T> {
         self.chunks[handle.chunk_index as usize].free(handle.allocation);
     }
 
-    /// Returns a slice of `size` elements for a live allocation.
-    pub fn get(&self, handle: Handle, size: usize) -> &[T] {
+    pub fn get_mut(&mut self, handle: Handle) -> &mut [T] {
         let start = handle.vec_index(CHUNK_SIZE);
-        &self.vec[start..start + size]
+        let size = handle.size as usize;
+        &mut self.vec[start..start + size]
     }
 
-    /// Returns a mutable slice of `size` elements for a live allocation.
-    pub fn get_mut(&mut self, handle: Handle, size: usize) -> &mut [T] {
+    pub fn get(&self, handle: Handle) -> &[T] {
         let start = handle.vec_index(CHUNK_SIZE);
-        &mut self.vec[start..start + size]
+        let size = handle.size as usize;
+        &self.vec[start..start + size]
     }
 
     pub fn as_slice(&self) -> &[T] {

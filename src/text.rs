@@ -57,7 +57,6 @@ pub struct Text {
 
     pub(crate) using_frame_based_visibility: bool,
 
-    pub(crate) scrolled_moved_indices: Vec<AnyBox>,
     pub(crate) scroll_animations: Vec<ScrollAnimation>,
 
     pub(crate) current_visibility_frame: u64,
@@ -429,7 +428,6 @@ impl Text {
             style_version_id_counter: 0,
             input_state: TextInputState::new(),
             mouse_hit_stack: Vec::with_capacity(6),
-            scrolled_moved_indices: Vec::new(),
             scroll_animations: Vec::new(),
             current_visibility_frame: 1,
             using_frame_based_visibility: false,
@@ -529,12 +527,12 @@ impl Text {
                 } else {
                     0x00_00_00_00
                 };
-                glyph_quads.heap.as_slice_mut()[cursor_index].color = color;
+                glyph_quads.as_slice_mut()[cursor_index].color = color;
             }
         }
 
         // Sync quads buffer
-        if glyph_quads.dirty {
+        if glyph_quads.needs_gpu_sync() {
             // Normal sync
             let glyph_quads_reallocated = glyph_quads.load_to_gpu(
                 &self.renderer.device,
@@ -546,7 +544,7 @@ impl Text {
         } else if self.shared.rerender_cursor {
             // Do a small sync for just the blinking cursor
             if let Some(cursor_index) = self.shared.render_data.cursor_quad_index {
-                let bytes: &[u8] = bytemuck::cast_slice(std::slice::from_ref(&glyph_quads.heap.as_slice()[cursor_index]));
+                let bytes: &[u8] = bytemuck::cast_slice(std::slice::from_ref(&glyph_quads.as_slice()[cursor_index]));
                 let offset = (cursor_index * std::mem::size_of::<GlyphQuad>()) as u64;
                 self.renderer.queue.write_buffer(glyph_quads.buffer(), offset, bytes);
             }
@@ -927,51 +925,24 @@ impl Text {
             text_edit.text_changed = false;
         }
 
-        // todo: not sure if this works correctly with multi-window.
-        if !self.shared.rebuild_glyph_quad_buffer && self.using_frame_based_visibility {
-            // see if any text boxes were just hidden
-            for (_i, text_edit) in self.text_edits.iter_mut() {
-                if text_edit.text_box.last_frame_touched == self.current_visibility_frame - 1 {
-                    self.shared.rebuild_glyph_quad_buffer = true;
-                }
-            }
-            for (_i, text_box) in self.text_boxes.iter_mut() {
-                if text_box.last_frame_touched == self.current_visibility_frame - 1 {
-                    self.shared.rebuild_glyph_quad_buffer = true;
-                }
+        self.shared.render_data.advance_frame();
+
+        // Each box decides internally whether to do a full rebuild or a fast BoxGpu-only update.
+        let current_frame = self.current_visibility_frame;
+        for (_key, text_edit) in self.text_edits.iter_mut() {
+            if !text_edit.text_box.hidden() && text_edit.text_box.last_frame_touched == current_frame {
+                self.shared.render_data.prepare_text_edit_layout(text_edit, &mut self.shared.scratch_quads);
+            } else {
+                self.shared.render_data.release_glyph_quads(&mut text_edit.text_box.render_data_info);
             }
         }
 
-        if self.shared.rebuild_glyph_quad_buffer {
-            // Full clear and re-prepare everything
-            self.shared.render_data.clear();
-        } else if !self.scrolled_moved_indices.is_empty() {
-            // Scroll only - just update BoxGpu, no clearing needed.
-            if !self.handle_scroll_fast_path() {
-                // Fast path failed (tolerance exceeded), fall back to full prepare
-                self.shared.render_data.clear();
-                self.shared.rebuild_glyph_quad_buffer = true;
-            }
-        }
-
-        // Prepare text layout for all text boxes/edits (only if text_changed)
-        if self.shared.rebuild_glyph_quad_buffer {
-            let current_frame = self.current_visibility_frame;
-            for (_key, text_edit) in self.text_edits.iter_mut() {
-                if !text_edit.text_box.hidden() && text_edit.text_box.last_frame_touched == current_frame {
-                    self.shared.render_data.prepare_text_edit_layout(text_edit, &mut self.shared.scratch_quads);
-                } else {
-                    self.shared.render_data.release_glyph_quads(&mut text_edit.text_box.render_data_info);
-                }
-            }
-
-            for (key, mut text_box) in self.text_boxes.iter_mut() {
-                if !text_box.hidden() && text_box.last_frame_touched == current_frame {
-                    let show_selection = self.shared.multi_box_selection.contains(&key);
-                    self.shared.render_data.prepare_text_box_layout(&mut text_box, false, show_selection, &mut self.shared.scratch_quads);
-                } else {
-                    self.shared.render_data.release_glyph_quads(&mut text_box.render_data_info);
-                }
+        for (key, mut text_box) in self.text_boxes.iter_mut() {
+            if !text_box.hidden() && text_box.last_frame_touched == current_frame {
+                let show_selection = self.shared.multi_box_selection.contains(&key);
+                self.shared.render_data.prepare_text_box_layout(&mut text_box, false, show_selection, &mut self.shared.scratch_quads);
+            } else {
+                self.shared.render_data.release_glyph_quads(&mut text_box.render_data_info);
             }
         }
 
@@ -984,8 +955,6 @@ impl Text {
         };
 
         if should_clear_flags {
-            self.clear_finished_scroll_animations();
-
             self.shared.rebuild_glyph_quad_buffer = false;
             self.using_frame_based_visibility = false;
 
@@ -1001,48 +970,6 @@ impl Text {
     /// Fast path for handling scroll-only changes by adjusting BoxGpu translation.
     /// Returns false if scroll has exceeded the tolerance from the base position (line culling),
     /// in which case the caller should fall back to a full re-prepare.
-    fn handle_scroll_fast_path(&mut self) -> bool {
-        for any_box in &self.scrolled_moved_indices {
-            match any_box {
-                AnyBox::TextEdit(i) => {
-                    if let Some(text_edit) = self.text_edits.get_mut(*i) {
-                        if text_edit.text_box.is_scroll_distance_above_tolerance() {
-                            return false;
-                        } else {
-                            update_scroll(&mut self.shared.render_data, &mut text_edit.text_box.render_data_info, text_edit.text_box.scroll_offset);
-                        }
-                    }
-                },
-                AnyBox::TextBox(i) => {
-                    if let Some(text_box) = self.text_boxes.get_mut(*i) {
-                        if text_box.is_scroll_distance_above_tolerance() {
-                            return false;
-                        } else {
-                            update_scroll(&mut self.shared.render_data, &mut text_box.render_data_info, text_box.scroll_offset);
-                        }
-                    }
-                },
-            }
-        }
-        true
-    }
-
-    /// Clear scroll indices only for elements that have finished their animations
-    fn clear_finished_scroll_animations(&mut self) {
-        self.scrolled_moved_indices.retain(|any_box| {
-            match any_box {
-                AnyBox::TextEdit(i) => {
-                    // Keep in list if any animation is still running for this text edit
-                    self.scroll_animations.iter().any(|anim| anim.handle.key == *i)
-                },
-                AnyBox::TextBox(_i) => {
-                    // Text boxes don't have animations, so they can be cleared immediately
-                    false
-                },
-            }
-        });
-    }
-
     /// Handle window events for all text areas in a specific window.
     /// 
     /// Returns `true` if the event was consumed by a text area.
@@ -1400,7 +1327,6 @@ impl Text {
                     let handle = TextEditHandle { key: i };
                     let did_scroll = self.handle_text_edit_scroll_event(&handle, event, window);
                     if did_scroll {
-                        self.scrolled_moved_indices.push(AnyBox::TextEdit(i));
                         self.shared.rerender_cursor = true;
                         self.shared.scrolled = true;
                     }
@@ -1481,18 +1407,11 @@ impl Text {
                 if self.shared.rebuild_glyph_quad_buffer {
                     self.shared.reset_cursor_blink();
                 }
-                if !self.shared.rebuild_glyph_quad_buffer && self.shared.scrolled {
-                    self.scrolled_moved_indices.push(AnyBox::TextEdit(i));
-                }
                 consumed
             },
             AnyBox::TextBox(i) => {
                 let handle = TextBoxHandle { key: i };
                 let consumed = self.get_text_box_mut(&handle).handle_event(event, window, &input_state);
-
-                if !self.shared.rebuild_glyph_quad_buffer && self.shared.scrolled {
-                    self.scrolled_moved_indices.push(AnyBox::TextBox(i));
-                }
 
                 // Handle cross-box selection extension for linked boxes
                 if let WindowEvent::CursorMoved { .. } = event {
@@ -1911,7 +1830,7 @@ impl Text {
     /// 
     /// Games and applications that rerender continuously can call `Window::request_redraw()` unconditionally after every `RedrawRequested` event, without checking this method.
     pub fn needs_rerender(&mut self) -> bool {
-        return self.shared.rebuild_glyph_quad_buffer || self.shared.rerender_cursor || self.shared.scrolled || !self.scrolled_moved_indices.is_empty();
+        return self.shared.rebuild_glyph_quad_buffer || self.shared.rerender_cursor || self.shared.scrolled;
     }
 
     /// Get a mutable reference to a text box wrapped with its style.
@@ -2400,23 +2319,6 @@ impl Text {
             },
         }
     }
-}
-
-/// Update scroll by adjusting BoxGpu translation instead of modifying quad positions.
-/// Returns false if scroll has exceeded the tolerance from the base position (line culling boundary),
-/// in which case a full re-prepare is needed to get the correct lines.
-fn update_scroll(render_data: &mut RenderData, quad_storage: &mut RenderDataInfo, current_scroll: (f32, f32)) -> bool {
-    // Check if we've scrolled too far from the base (line culling tolerance)
-    // Compute delta from last scroll position
-    let delta_x = current_scroll.0 - quad_storage.last_scroll.0;
-    let delta_y = current_scroll.1 - quad_storage.last_scroll.1;
-
-    // Adjust BoxGpu translation and clip_rect for scroll
-    render_data.adjust_box_for_scroll(quad_storage.box_index, delta_x, delta_y);
-
-    // Update last_scroll to track the current state
-    quad_storage.last_scroll = current_scroll;
-    true
 }
 
 // todo: get this from system settings.

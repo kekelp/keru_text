@@ -65,6 +65,7 @@ pub struct TextBox {
 
     pub(crate) hidden: bool,
     pub(crate) offscreen: bool,
+    pub(crate) needs_quad_rebuild: bool,
     pub(crate) last_frame_touched: u64,
     pub(crate) can_hide: bool,
     
@@ -100,14 +101,10 @@ pub struct TextBox {
 pub(crate) struct RenderDataInfo {
     /// Index into the text renderer's box_data array for this text box
     pub box_index: usize,
-    /// The scroll offset when quads were prepared (for tolerance check)
+    /// The scroll offset when quads were prepared (for line-culling tolerance check)
     pub base_scroll: (f32, f32),
-    /// The scroll offset currently reflected in BoxGpu translation (for incremental delta)
-    pub last_scroll: (f32, f32),
     /// Handle into the glyph quad heap for this box's current allocation.
     pub glyph_quad_handle: Option<Handle>,
-    /// Number of quads in the current heap allocation.
-    pub glyph_quad_count: u32,
 }
 
 
@@ -184,15 +181,14 @@ impl TextBox {
             scroll_offset: (0.0, 0.0),
             hidden: false,
             offscreen: false,
+            needs_quad_rebuild: true,
             last_frame_touched: 0,
             can_hide: false,
             window_id: None,
             render_data_info: RenderDataInfo {
                 box_index: 0,
                 base_scroll: (0.0, 0.0),
-                last_scroll: (0.0, 0.0),
                 glyph_quad_handle: None,
-                glyph_quad_count: 0,
             },
             explicit_hitbox: None,
             shared_backref,
@@ -425,7 +421,8 @@ impl TextBox {
         match self.render_data_info.glyph_quad_handle {
             Some(handle) => {
                 let start = handle.vec_index(CHUNK_SIZE);
-                (start, start + self.render_data_info.glyph_quad_count as usize)
+                let size = handle.size as usize;
+                (start, start + size)
             }
             None => (0, 0),
         }
@@ -988,6 +985,7 @@ impl TextBox {
             return;
         }
         self.auto_clip = auto_clip;
+        self.needs_quad_rebuild = true;
         self.shared_mut().rebuild_glyph_quad_buffer = true;
     }
 
