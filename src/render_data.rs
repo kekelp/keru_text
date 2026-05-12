@@ -382,7 +382,7 @@ pub(crate) fn make_decoration_quad(rect: BoundingBox, color: u32, box_index: u32
 
 impl RenderData {
     /// Create a new RenderData with a specific atlas size.
-    pub fn new(device: &wgpu::Device, atlas_size: u32) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, atlas_size: u32) -> Self {
         let glyph_cache = LruCache::unbounded_with_hasher(BuildHasherDefault::<FxHasher>::default());
 
         let mask_atlas_pages = vec![AtlasPage {
@@ -407,9 +407,9 @@ impl RenderData {
             mask_atlas_pages,
             color_atlas_pages,
             glyph_quads: GpuHeap::with_usage(device, 1000, "glyph quads buffer", wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST),
-            box_data: GpuSlab::new(device, 30, "box data buffer"),
+            box_data: GpuSlab::new(device, queue, 30, "box data buffer"),
             group_transforms: {
-                let mut slab = GpuSlab::new(device, 16, "group transform buffer");
+                let mut slab = GpuSlab::new(device, queue, 16, "group transform buffer");
                 let _ = slab.insert(GroupTransform::identity()); // Index 0 is always identity
                 slab
             },
@@ -473,9 +473,9 @@ impl RenderData {
     }
 
     /// Zero out and free a text box's glyph quad heap allocation.
-    pub(crate) fn release_glyph_quads(&mut self, info: &mut RenderDataInfo) {
+    pub(crate) fn release_glyph_quads(&mut self, info: &mut RenderDataInfo, encoder: &mut wgpu::CommandEncoder) {
         if let Some(handle) = info.glyph_quad_handle.take() {
-            self.glyph_quads.free_and_clear(handle);
+            self.glyph_quads.free_and_clear(handle, encoder);
         }
     }
 
@@ -489,7 +489,7 @@ impl RenderData {
     }
 
     /// Prepare a text edit layout for rendering with scrolling and clipping support.
-    pub fn prepare_text_edit_layout(&mut self, text_edit: &mut TextEdit, scratch: &mut Vec<GlyphQuad>) {
+    pub fn prepare_text_edit_layout(&mut self, text_edit: &mut TextEdit, scratch: &mut Vec<GlyphQuad>, encoder: &mut wgpu::CommandEncoder) {
         if text_edit.hidden() {
             return;
         }
@@ -509,10 +509,10 @@ impl RenderData {
         if had_relayout { self.stats.relayouts += 1; }
         if had_relayout { text_edit.text_box.needs_quad_rebuild = true; }
 
-        self.prepare_text_box_layout(&mut text_edit.text_box, scratch, 20);
+        self.prepare_text_box_layout(&mut text_edit.text_box, scratch, 20, encoder);
     }
 
-    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, scratch: &mut Vec<GlyphQuad>, spare_capacity: u32) {
+    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, scratch: &mut Vec<GlyphQuad>, spare_capacity: u32, encoder: &mut wgpu::CommandEncoder) {
         let w = self.params.screen_resolution_width;
         let h = self.params.screen_resolution_height;
         let t = text_box.transform.translation;
@@ -522,7 +522,7 @@ impl RenderData {
             #[cfg(debug_assertions)] {
                 self.stats.boxes_skipped += 1;
             }
-            self.release_glyph_quads(&mut text_box.render_data_info);
+            self.release_glyph_quads(&mut text_box.render_data_info, encoder);
             return;
         }
         #[cfg(debug_assertions)] {
@@ -597,7 +597,7 @@ impl RenderData {
 
         text_box.render_data_info.base_scroll = scroll_offset;
 
-        self.glyph_quads.allocate_or_grow_and_write(&mut text_box.render_data_info.glyph_quad_handle, quads, spare_capacity);
+        self.glyph_quads.allocate_or_grow_and_write(&mut text_box.render_data_info.glyph_quad_handle, quads, spare_capacity, encoder);
 
         text_box.needs_quad_rebuild = false;
     }

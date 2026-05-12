@@ -56,6 +56,8 @@ pub struct Text {
 
     pub(crate) renderer: TextRenderer,
 
+    pub(crate) encoder: Option<wgpu::CommandEncoder>,
+
     #[cfg(feature = "accessibility")]
     pub(crate) accesskit_id_to_text_handle_map: HashMap<NodeId, AnyBox>,
 
@@ -510,7 +512,7 @@ impl Text {
         debug_assert_eq!(key, DEFAULT_STYLE_KEY);
 
         let atlas_size = params.atlas_page_size.size(device);
-        let mut render_data = RenderData::new(device, atlas_size);
+        let mut render_data = RenderData::new(device, queue, atlas_size);
         render_data.set_srgb(format.is_srgb());
 
         let renderer = TextRenderer::new_with_params(
@@ -529,6 +531,7 @@ impl Text {
             text_edits: Slab::with_capacity(10),
             input_state: TextInputState::new(),
             scroll_animations: Vec::with_capacity(4),
+            encoder: None,
             renderer,
 
             #[cfg(feature = "accessibility")]
@@ -588,16 +591,8 @@ impl Text {
     ///
     /// Useful only for custom rendering.
     pub fn load_to_gpu(&mut self) {
-        let box_data_reallocated = self.shared.render_data.box_data.load_to_gpu(
-            &self.renderer.device,
-            &self.renderer.queue,
-            "box data buffer",
-        );
-        let group_transforms_reallocated = self.shared.render_data.group_transforms.load_to_gpu(
-            &self.renderer.device,
-            &self.renderer.queue,
-            "group transform buffer",
-        );
+        let box_data_reallocated = self.shared.render_data.box_data.load_to_gpu();
+        let group_transforms_reallocated = self.shared.render_data.group_transforms.load_to_gpu();
         let mut needs_bind_group_recreate = box_data_reallocated || group_transforms_reallocated;
 
         // Update uniform buffer if needed
@@ -616,16 +611,9 @@ impl Text {
             self.renderer.update_texture_arrays(&mut self.shared.render_data);
         }
 
-        // Sync quads buffer
-        let glyph_quads = &mut self.shared.render_data.glyph_quads;
-        if glyph_quads.needs_gpu_sync() {
-            let glyph_quads_reallocated = glyph_quads.load_to_gpu(
-                &self.renderer.device,
-                &self.renderer.queue,
-            );
-            if glyph_quads_reallocated {
-                needs_bind_group_recreate = true;
-            }
+        // Sync quads buffer bind group if the buffer was reallocated during prepare.
+        if self.shared.render_data.glyph_quads.take_reallocated() {
+            needs_bind_group_recreate = true;
         }
         self.shared.decorations_dirty = false;
 
@@ -986,12 +974,16 @@ impl Text {
     }
 
     pub(crate) fn prepare_all_impl(&mut self, window_id: WindowId, window_size: (f32, f32)) {
+        let mut encoder = self.encoder.take().unwrap_or_else(|| {
+            self.renderer.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default())
+        });
+
         #[cfg(debug_assertions)] {
             self.shared.render_data.stats = RenderStats::default();
         }
 
         // this apparently avoids some sort of cache miss where the contains() keeps loading the empty vec for no reason.
-        let styles_changed = ! self.shared.changed_style_keys.is_empty(); 
+        let styles_changed = ! self.shared.changed_style_keys.is_empty();
 
         self.shared.pasted_this_frame = false;
         self.shared.render_data.update_resolution(window_size.0, window_size.1);
@@ -1003,13 +995,12 @@ impl Text {
 
         self.shared.render_data.advance_frame();
 
-
         for (_, text_edit) in self.text_edits.iter_mut() {
             if styles_changed && self.shared.changed_style_keys.contains(&text_edit.text_box.style.key) {
                 text_edit.text_box.needs_relayout = true;
             }
             if ! text_edit.text_box.hidden() {
-                self.shared.render_data.prepare_text_edit_layout(text_edit, &mut self.shared.scratch_quads);
+                self.shared.render_data.prepare_text_edit_layout(text_edit, &mut self.shared.scratch_quads, &mut encoder);
             }
         }
 
@@ -1018,11 +1009,11 @@ impl Text {
                 text_box.needs_relayout = true;
             }
             if ! text_box.hidden() {
-                self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads, 4);
+                self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads, 4, &mut encoder);
             }
         }
 
-        self.prepare_decoration_quads();
+        self.prepare_decoration_quads(&mut encoder);
 
         // Multi-window: mark prepared and check if all windows done.
         let should_clear_flags = {
@@ -1033,6 +1024,10 @@ impl Text {
         };
 
         if should_clear_flags {
+            self.shared.render_data.glyph_quads.finish_belt();
+            self.renderer.queue.submit(Some(encoder.finish()));
+            self.shared.render_data.glyph_quads.recall_belt();
+
             // Reset all windows to unprepared for next frame
             for window_info in &mut self.shared.windows {
                 window_info.prepared = false;
@@ -1041,10 +1036,12 @@ impl Text {
             self.shared.changed_style_keys.clear();
 
             self.shared.scrolled = self.get_max_animation_duration().is_some();
+        } else {
+            self.encoder = Some(encoder);
         }
     }
 
-    fn prepare_decoration_quads(&mut self) {
+    fn prepare_decoration_quads(&mut self, encoder: &mut wgpu::CommandEncoder) {
         if !self.shared.decorations_dirty {
             return;
         }
@@ -1084,7 +1081,7 @@ impl Text {
 
         let scratch = &self.shared.scratch_quads;
         let rd = &mut self.shared.render_data;
-        rd.glyph_quads.allocate_or_grow_and_write(&mut rd.decoration_quad_handle, scratch, 20);
+        rd.glyph_quads.allocate_or_grow_and_write(&mut rd.decoration_quad_handle, scratch, 20, encoder);
     }
 
     /// Returns `true` if the event was consumed by a text area.

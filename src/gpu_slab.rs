@@ -14,6 +14,8 @@ pub struct GpuSlab<T: GpuSlabItem + Copy> {
     buffer_capacity: usize,
     label: String,
     dirty: bool,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
 }
 
 /// Trait implemented by user types to expose slab metadata stored inside the struct.
@@ -26,7 +28,7 @@ pub trait GpuSlabItem {
 
 impl<T: GpuSlabItem + Copy> GpuSlab<T> {
     /// Create a new `GpuSlab` with a GPU buffer.
-    pub fn new(device: &wgpu::Device, capacity: usize, label: &str) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, capacity: usize, label: &str) -> Self {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: (size_of::<T>() * capacity.max(1)) as u64,
@@ -41,6 +43,8 @@ impl<T: GpuSlabItem + Copy> GpuSlab<T> {
             buffer_capacity: capacity,
             label: label.to_string(),
             dirty: false,
+            device: device.clone(),
+            queue: queue.clone(),
         }
     }
 
@@ -82,7 +86,7 @@ impl<T: GpuSlabItem + Copy> GpuSlab<T> {
 
     /// Updates the underlying GPU buffer with current data.
     /// Returns true if the buffer was reallocated.
-    pub fn load_to_gpu(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, label: &str) -> bool {
+    pub fn load_to_gpu(&mut self) -> bool {
         if !self.dirty {
             return false;
         }
@@ -90,9 +94,8 @@ impl<T: GpuSlabItem + Copy> GpuSlab<T> {
         let needs_new_buffer = self.items.len() > self.buffer_capacity;
         if needs_new_buffer {
             self.buffer_capacity = self.items.len().max(1).next_power_of_two();
-            self.label = label.to_string();
-            self.buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label),
+            self.buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(self.label.as_str()),
                 size: (size_of::<T>() * self.buffer_capacity) as u64,
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
@@ -101,7 +104,7 @@ impl<T: GpuSlabItem + Copy> GpuSlab<T> {
 
         if !self.items.is_empty() {
             let size = self.items.len() * size_of::<T>();
-            queue.write_buffer(&self.buffer, 0, unsafe {
+            self.queue.write_buffer(&self.buffer, 0, unsafe {
                 std::slice::from_raw_parts(self.items[..].as_ptr() as *const u8, size)
             });
         }
