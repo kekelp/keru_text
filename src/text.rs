@@ -647,7 +647,8 @@ impl Text {
     /// 
     /// `text` can be a `String`, a `&'static str`, or a `Cow<'static, str>`.
     #[must_use]
-    pub fn add_text_box(&mut self, text: impl Into<Cow<'static, str>>, pos: (f64, f64), size: (f32, f32), depth: f32) -> TextBoxHandle {
+    pub fn add_text_box(&mut self, text: impl Into<Cow<'static, str>>, pos: Option<(f64, f64)>, size: (f32, f32), depth: f32) -> TextBoxHandle {
+        let pos = pos.unwrap_or((f64::MIN, f64::MIN));
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
         let mut text_box = TextBox::new(text, pos, size, depth, DEFAULT_STYLE_KEY, shared_backref);
 
@@ -678,7 +679,8 @@ impl Text {
     /// 
     /// The [`TextEdit`] must be manually removed by calling [`Text::remove_text_edit()`].
     #[must_use]
-    pub fn add_text_edit(&mut self, text: String, pos: (f64, f64), size: (f32, f32), depth: f32) -> TextEditHandle {
+    pub fn add_text_edit(&mut self, text: String, pos: Option<(f64, f64)>, size: (f32, f32), depth: f32) -> TextEditHandle {
+        let pos = pos.unwrap_or((f64::MIN, f64::MIN));
         let shared_backref: NonNull<Shared> = NonNull::new(self.shared.deref_mut()).unwrap();
         let mut text_edit = TextEdit::new(text, pos, size, depth, DEFAULT_STYLE_KEY, shared_backref);
 

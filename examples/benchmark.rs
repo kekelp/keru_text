@@ -85,7 +85,7 @@ impl State {
             \
             Layouting a long text just once can still be quite slow, but this alone isn't enough to cause dramatic 30 second freezes. It can still cause the FPS to drop quite low, but from what I've seen, this effect is of the same order of magnitude as you see in browsers. Of course if text is split reasonably across multiple text boxes (one per UI element or one per paragraph) none of this is an issue.
              ",
-            (10.0, 10.0),
+            Some((10.0, 10.0)),
             (1850.0, 60.0),
             0.0
         );
@@ -95,21 +95,21 @@ impl State {
         let stats_row_y = 270.0;
         let first_frame_stats = text.add_text_box(
             "",
-            (110.0, stats_row_y),
+            Some((110.0, stats_row_y)),
             (400.0, 100.0),
             0.0
         );
 
         let avg_stats = text.add_text_box(
             "Average: computing...".to_string(),
-            (520.0, stats_row_y),
+            Some((520.0, stats_row_y)),
             (400.0, 100.0),
             0.0
         );
 
         let char_count = text.add_text_box(
             "Total bytes of text:".to_string(),
-            (880.0, stats_row_y),
+            Some((880.0, stats_row_y)),
             (400.0, 100.0),
             0.0
         );
@@ -117,14 +117,14 @@ impl State {
 
         let frame_counter = text.add_text_box(
             "0",
-            (1820.0, 20.0),
+            Some((1820.0, 20.0)),
             (90.0, 30.0),
             0.0
         );
 
         let help_text = text.add_text_box(
             REALISTIC_MODE_DESC,
-            (1250.0, stats_row_y),
+            Some((1250.0, stats_row_y)),
             (600.0, 100.0),
             0.0
         );
@@ -167,7 +167,7 @@ impl State {
 
             let handle = text.add_text_edit(
                 text_content.to_string(),
-                (x, y),
+                Some((x, y)),
                 (box_width, box_height),
                 0.0
             );

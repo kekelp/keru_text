@@ -82,16 +82,16 @@ impl State {
         }, None);
 
         // Create text boxes and get handles. Normally, the handle would be owned by a higher level struct representing a node in a GUI tree or something similar.
-        let single_line_input = text.add_text_edit("".to_string(), (10.0, 15.0), (200.0, 35.0), 0.0);
-        let editable_text_with_unicode = text.add_text_edit("Editable 🌈 text ⚡⚡ 無限での座を含む全ての سلام دنیا، این یک متن قابل ویرایش است Editable text 無限での座を含む全ての سلام دنیا، این یک متن قابل ویرایش است".to_string(), (300.0, 200.0), (400.0, 200.0), 0.0);
-        let _info = text.add_text_box("Press Ctrl + D to disable the top edit box.".to_string(), (10.0, 60.0), (200.0, 100.0), 0.0);
-        let _help_text_edit = text.add_text_edit("Press Ctrl + Plus and Ctrl + Minus to adjust the size of the big text.".to_string(), (470.0, 60.0), (200.0, 150.0), 0.0);
-        let shift_enter_text_edit = text.add_text_edit("Use Shift+Enter for newlines here".to_string(), (250.0, 60.0), (200.0, 100.0), 0.0);
-        
-        let clipped_text_box = text.add_text_box("Clipped text".to_string(), (0.0, 0.0), (1000.0, 1000.0), 0.0);
-        
+        let single_line_input = text.add_text_edit("".to_string(), Some((10.0, 15.0)), (200.0, 35.0), 0.0);
+        let editable_text_with_unicode = text.add_text_edit("Editable 🌈 text ⚡⚡ 無限での座を含む全ての سلام دنیا، این یک متن قابل ویرایش است Editable text 無限での座を含む全ての سلام دنیا، این یک متن قابل ویرایش است".to_string(), Some((300.0, 200.0)), (400.0, 200.0), 0.0);
+        let _info = text.add_text_box("Press Ctrl + D to disable the top edit box.".to_string(), Some((10.0, 60.0)), (200.0, 100.0), 0.0);
+        let _help_text_edit = text.add_text_edit("Press Ctrl + Plus and Ctrl + Minus to adjust the size of the big text.".to_string(), Some((470.0, 60.0)), (200.0, 150.0), 0.0);
+        let shift_enter_text_edit = text.add_text_edit("Use Shift+Enter for newlines here".to_string(), Some((250.0, 60.0)), (200.0, 100.0), 0.0);
+
+        let clipped_text_box = text.add_text_box("Clipped text".to_string(), Some((0.0, 0.0)), (1000.0, 1000.0), 0.0);
+
         // Using a &'static str here for this non-editable text box.
-        let justified_static_text = text.add_text_box("Long static words, Long static words, Long static words, Long static words, ... (justified btw) ", (150.0, 440.0), (600.0, 150.0), 0.0);
+        let justified_static_text = text.add_text_box("Long static words, Long static words, Long static words, Long static words, ... (justified btw) ", Some((150.0, 440.0)), (600.0, 150.0), 0.0);
         
         // Use the handles to access and edit text boxes. Accessing a box through a handle is a very fast operation, basically just an array access. There is no hashing involved.
         text.get_text_edit_mut(&single_line_input).set_single_line(true);

@@ -91,7 +91,7 @@ impl State {
         let mut text = Text::new(&device, &queue, surface_config.format);
         let _text_handle = text.add_text_box(
             "Text rendering supports basic depth testing, but this isn't enough to draw multiple semitransparent objects both behind and in front of text. The third triangle is rendered in a separate draw call.    Text rendering supports basic depth testing, but this isn't enough to draw multiple semitransparent objects both behind and in front of text. The third triangle is rendered in a separate draw call.    Text rendering supports basic depth testing, but this isn't enough to draw multiple semitransparent objects both behind and in front of text. The third triangle is rendered in a separate draw call.    Text rendering supports basic depth testing, but this isn't enough to draw multiple semitransparent objects both behind and in front of text. The third triangle is rendered in a separate draw call.    ",
-            (50.0, 50.0),
+            Some((50.0, 50.0)),
             (700.0, 300.0),
             text_depth
         );

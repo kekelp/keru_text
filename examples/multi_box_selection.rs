@@ -62,7 +62,7 @@ impl State {
         // Create a sequence of linked text boxes that form a paragraph split across multiple boxes
         let box1 = text.add_text_box(
             "This is the first text box. It contains some text that you can select.",
-            (50.0, 50.0),
+            Some((50.0, 50.0)),
             (400.0, 60.0),
             0.0
         );
@@ -70,7 +70,7 @@ impl State {
 
         let box2 = text.add_text_box(
             "This is the second text box, linked after the first. Selection should continue here.",
-            (50.0, 180.0),
+            Some((50.0, 180.0)),
             (400.0, 60.0),
             0.0
         );
@@ -78,7 +78,7 @@ impl State {
 
         let box3 = text.add_text_box(
             "And this is the third text box. The chain continues through all three boxes.",
-            (50.0, 280.0),
+            Some((50.0, 280.0)),
             (400.0, 60.0),
             0.0
         );
@@ -91,7 +91,7 @@ impl State {
         // Add a second chain of boxes to test multiple independent chains (horizontal, below main chain)
         let chain2_box1 = text.add_text_box(
             "Second chain, first box. ",
-            (50.0, 400.0),
+            Some((50.0, 400.0)),
             (250.0, 50.0),
             0.0
         );
@@ -99,7 +99,7 @@ impl State {
 
         let chain2_box2 = text.add_text_box(
             "Second chain, second box. ",
-            (320.0, 400.0),
+            Some((320.0, 400.0)),
             (250.0, 50.0),
             0.0
         );
@@ -107,7 +107,7 @@ impl State {
 
         let chain2_box3 = text.add_text_box(
             "Second chain, third box.",
-            (590.0, 400.0),
+            Some((590.0, 400.0)),
             (250.0, 50.0),
             0.0
         );

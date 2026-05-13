@@ -472,13 +472,6 @@ impl RenderData {
         self.frame += 1;
     }
 
-    /// Zero out and free a text box's glyph quad heap allocation.
-    pub(crate) fn release_glyph_quads(&mut self, info: &mut RenderDataInfo, encoder: &mut wgpu::CommandEncoder) {
-        if let Some(handle) = info.glyph_quad_handle.take() {
-            self.glyph_quads.free_and_clear(handle, encoder);
-        }
-    }
-
     /// Update the screen resolution in the render data.
     pub fn update_resolution(&mut self, width: f32, height: f32) {
         if self.params.screen_resolution_width != width || self.params.screen_resolution_height != height {
@@ -516,13 +509,18 @@ impl RenderData {
         let w = self.params.screen_resolution_width;
         let h = self.params.screen_resolution_height;
         let t = text_box.transform.translation;
+        let t = if let Some(handle) = text_box.group_transform_index {
+            let group = &self.group_transforms[handle.0];
+            (t.0 * group.scale + group.offset[0], t.1 * group.scale + group.offset[1])
+        } else {
+            t
+        };
         let offscreen = t.0 < -(5.0 * w) || t.0 > 6.0 * w || t.1 < -(5.0 * h) || t.1 > 6.0 * h;
 
         if text_box.hidden() || offscreen {
             #[cfg(debug_assertions)] {
                 self.stats.boxes_skipped += 1;
             }
-            self.release_glyph_quads(&mut text_box.render_data_info, encoder);
             return;
         }
         #[cfg(debug_assertions)] {

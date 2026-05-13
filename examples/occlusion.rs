@@ -61,7 +61,7 @@ impl State {
             I tried rendering something on the right half, but it takes too much code. \n\
             Just imagine that the right half of the screen is occluded by a semitransparent panel.
             ".to_string(),
-            (200.0, 200.0), // Center of 800x600 window
+            Some((200.0, 200.0)), // Center of 800x600 window
             (350.0, 600.0),
             1.0, // Behind the occluding rectangle (depth 0.5)
         );

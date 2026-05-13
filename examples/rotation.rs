@@ -28,7 +28,7 @@ impl State {
         surface.configure(&device, &surface_config);
 
         let mut text = Text::new(&device, &queue, surface_config.format);
-        let text_edit_handle = text.add_text_edit("Type here. Rotations after the cpu-side rasterization by just rotating the gpu quads, so this is not a high quality way to render highly dynamic text. If you just need to rotate text by 90 degrees, as in an axis label in a lot, it's good.".to_string(), (50.0, 50.0), (400.0, 200.0), 0.0);
+        let text_edit_handle = text.add_text_edit("Type here. Rotations after the cpu-side rasterization by just rotating the gpu quads, so this is not a high quality way to render highly dynamic text. If you just need to rotate text by 90 degrees, as in an axis label in a lot, it's good.".to_string(), Some((50.0, 50.0)), (400.0, 200.0), 0.0);
         
         Self { device, queue, surface, surface_config, window, text, text_edit_handle }
     }

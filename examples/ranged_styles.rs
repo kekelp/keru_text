@@ -44,7 +44,7 @@ impl State {
 
         Vide modus et sed. Has an nullam facete disputando, eum at case volumus officiis. Cum cu magna graeco mandamus, no purto erat eruditi sit. Et alia tractatos nam, soleat eruditi ne pri. Quo at nullam nusquam dissentiunt. Primis quodsi per no. Pri choro ubique ei, ut sit oporteat consetetur.";
 
-        let edit_handle = text.add_text_edit(initial.to_string(), (50.0, 50.0), (500.0, 200.0), 0.0);
+        let edit_handle = text.add_text_edit(initial.to_string(), Some((50.0, 50.0)), (500.0, 200.0), 0.0);
 
         let edit = text.get_text_edit_mut(&edit_handle);
 
@@ -71,7 +71,7 @@ impl State {
             Ctrl + C: Make Cerulean \n\
             Ctrl + N: Clear all properties and return to normal \n\
         ";
-        let info_box = text.add_text_box(info, (50.0, 300.0), (500.0, 250.0), 0.0);
+        let info_box = text.add_text_box(info, Some((50.0, 300.0)), (500.0, 250.0), 0.0);
         text.get_text_box_mut(&info_box).push_ranged_style_property(SMALL, 0..info.len());
 
         Self { device, queue, surface, surface_config, window, text, edit_handle, modifiers }

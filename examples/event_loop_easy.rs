@@ -82,8 +82,8 @@ impl State {
         let new_arc_clone = window.clone();
         text.set_auto_wakeup(new_arc_clone);
         
-        let text_edit = text.add_text_edit("This is a text edit box with a bunch of text that can be scrolled. Use the mouse wheel to get a smooth scroll animation. And you can check the console output to see that we're only rerendering when needed.".to_string(), (50.0, 50.0), (400.0, 80.0), 0.0,);
-        let text_box = text.add_text_box("This is a regular non-editable text box.", (50.0, 180.0), (500.0, 120.0), 0.0,);
+        let text_edit = text.add_text_edit("This is a text edit box with a bunch of text that can be scrolled. Use the mouse wheel to get a smooth scroll animation. And you can check the console output to see that we're only rerendering when needed.".to_string(), Some((50.0, 50.0)), (400.0, 80.0), 0.0,);
+        let text_box = text.add_text_box("This is a regular non-editable text box.", Some((50.0, 180.0)), (500.0, 120.0), 0.0,);
 
         Self {
             device,

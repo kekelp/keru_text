@@ -26,7 +26,6 @@ struct State {
     surface: wgpu::Surface<'static>,
     surface_config: SurfaceConfiguration,
     
-    text_renderer: TextRenderer,
     text: Text,
     text_edit_handle: TextEditHandle,
     info_text_handle: TextBoxHandle,
@@ -61,24 +60,22 @@ impl State {
         let surface_config = surface.get_default_config(&wgpu_adapter, window.inner_size().width, window.inner_size().height).unwrap();
         surface.configure(&device, &surface_config);
 
-        let mut text = Text::new();
-        let text_edit_handle = text.add_text_edit("".to_string(), (50.0, 100.0), (300.0, 35.0), 0.0);
+        let mut text = Text::new(&device, &queue, surface.format);
+        let text_edit_handle = text.add_text_edit("".to_string(), Some((50.0, 100.0)), (300.0, 35.0), 0.0);
         text.set_text_edit_accesskit_id(&text_edit_handle, TEXT_EDIT_ID);
         text.get_text_edit_mut(&text_edit_handle).set_single_line(true);
         text.get_text_edit_mut(&text_edit_handle).set_placeholder_static("Type here");
         
         let info_text_handle = text.add_text_box(
             "This is an accessibility demo. To navigate, try using the platform screen reader's keyboard shortcuts (e.g. Caps Lock + arrow keys on Windows by default).".to_string(),
-            (50.0, 200.0), (400.0, 100.0), 0.0
+            Some((50.0, 200.0)), (400.0, 100.0), 0.0
         );
         text.set_text_box_accesskit_id(&info_text_handle, INFO_TEXT_ID);
 
-        let multiline_text_handle = text.add_text_edit("".to_string(), (50.0, 450.0), (500.0, 200.0), 0.0);
+        let multiline_text_handle = text.add_text_edit("".to_string(), Some((50.0, 450.0)), (500.0, 200.0), 0.0);
         text.set_text_edit_accesskit_id(&multiline_text_handle, MULTILINE_TEXT_ID);
         text.get_text_edit_mut(&multiline_text_handle).set_single_line(false);
         text.get_text_edit_mut(&multiline_text_handle).set_placeholder_static("Multiline text edit");
-
-        let text_renderer = TextRenderer::new(&device, &queue, surface_config.format);
         
         window.set_visible(true);
         window.set_ime_allowed(true);
@@ -89,7 +86,6 @@ impl State {
             queue,
             surface,
             surface_config,
-            text_renderer,
             text,
             text_edit_handle,
             info_text_handle,
@@ -173,7 +169,7 @@ impl State {
                 let frame = self.surface.get_current_texture().unwrap();
                 let view = frame.texture.create_view(&TextureViewDescriptor::default());
 
-                self.text.prepare_all(&mut self.text_renderer);
+                self.text.prepare_all();
                 self.text_renderer.load_to_gpu(&self.device, &self.queue);
 
                 let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { label: None });

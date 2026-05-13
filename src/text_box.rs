@@ -1470,7 +1470,6 @@ impl TextBox {
     /// Sets whether the text is selectable.
     pub fn set_selectable(&mut self, selectable: bool) {
         self.selectable = selectable;
-        self.rebuild_hit_test_data();
     }
     
     #[cfg(feature = "accessibility")]
