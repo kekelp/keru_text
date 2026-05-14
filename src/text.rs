@@ -944,6 +944,21 @@ impl Text {
     }
 
 
+    /// Returns the range of decoration quads (selection rects + cursor) in the shared glyph quad buffer.
+    ///
+    /// Decoration quads are shared across all text edits. Call this once per frame and push instances
+    /// for the returned range alongside the per-box glyph quads.
+    pub fn decoration_quad_range(&self) -> (usize, usize) {
+        match self.shared.render_data.decoration_quad_handle {
+            Some(handle) => {
+                let start = handle.vec_index(gpu_heap::CHUNK_SIZE);
+                let size = handle.size as usize;
+                (start, start + size)
+            }
+            None => (0, 0),
+        }
+    }
+
     /// Layout and rasterize all text belonging to a window, prepare the render data.
     pub fn prepare_all_for_window(&mut self, window: &Window) {
         let window_id = window.id();
