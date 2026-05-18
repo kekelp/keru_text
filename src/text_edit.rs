@@ -231,8 +231,6 @@ impl TextEdit {
 
         // Capture initial state for comparison
         let initial_selection = self.text_box.selection();
-        let initial_show_cursor = self.text_box.shared().cursor_blink_animation_currently_visible;
-
         let mut consumed = false;
 
         if ! self.showing_placeholder {
@@ -448,19 +446,7 @@ impl TextEdit {
 
         self.restore_placeholder_if_any();
 
-        let new_show_cursor = self.text_box.shared().cursor_blink_animation_currently_visible;
         let select_rects_changed = selection_rects_changed(initial_selection, self.text_box.selection(), !self.disabled);
-
-        if select_rects_changed {
-        }
-
-        if initial_show_cursor != new_show_cursor {
-            if self.text_box.selection.is_collapsed() {
-                self.text_box.shared_mut().reset_cursor_blink();
-            } else {
-                self.text_box.shared_mut().stop_cursor_blink()
-            }
-        }
 
         // Mark that we need to update scroll before rendering.
         // All these functions that rely on a fresh layout are deferred before a real render, otherwise when events come in too fast they cause too many unneeded layout rebuilds.

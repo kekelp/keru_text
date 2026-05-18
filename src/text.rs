@@ -1500,9 +1500,13 @@ impl Text {
         match focused {
             AnyBox::TextEdit(i) => {
                 let handle = TextEditHandle { key: i };
+                let selection_before = self.text_edits.get(i).map(|te| te.text_box.selection());
                 let consumed = self.get_text_edit_mut(&handle).handle_event_editable(event, window, &input_state);
+                let selection_after = self.text_edits.get(i).map(|te| te.text_box.selection());
 
-                self.shared.reset_cursor_blink();
+                if selection_before != selection_after {
+                    self.shared.reset_cursor_blink();
+                }
                 consumed
             },
             AnyBox::TextBox(i) => {
