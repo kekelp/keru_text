@@ -251,6 +251,7 @@ impl Shared {
             }
         } else {
             self.cursor_blink_start = None;
+            self.decorations_dirty = true;
             if let Some(waker) = &self.cursor_blink_waker {
                 waker.stop();
             }
