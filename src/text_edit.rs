@@ -478,7 +478,8 @@ impl TextEdit {
 
         self.text_box.adjust_ranged_styles_for_edit(range.start, range.end, s.len());
         self.text_box.text_mut_string().replace_range(range, s);
-        
+        self.text_changed = true;
+
         if self.single_line {
             self.remove_newlines();
         }
@@ -1311,6 +1312,7 @@ impl TextEdit {
         if self.showing_placeholder {
             self.clear_placeholder();
         }
+        self.text_changed = true;
         self.text_box.text_mut_string()
     }
 
@@ -1498,6 +1500,7 @@ impl TextEdit {
         self.text_box.move_to_text_end();
         // Clear any composition state
         self.compose = None;
+        self.text_changed = true;
         self.restore_placeholder_if_any();
     }
 
@@ -1516,6 +1519,7 @@ impl TextEdit {
         self.text_box.set_text_hashed(new_text);
         self.text_box.move_to_text_end();
         self.compose = None;
+        self.text_changed = true;
         self.restore_placeholder_if_any();
     }
 
@@ -1534,6 +1538,7 @@ impl TextEdit {
         self.text_box.set_text_with_pointer_check(new_text);
         self.text_box.move_to_text_end();
         self.compose = None;
+        self.text_changed = true;
         self.restore_placeholder_if_any();
     }
 
@@ -1545,6 +1550,7 @@ impl TextEdit {
         self.text_box.set_static_text(text);
         self.text_box.move_to_text_end();
         self.compose = None;
+        self.text_changed = true;
         self.restore_placeholder_if_any();
     }
 
@@ -1563,6 +1569,7 @@ impl TextEdit {
         self.text_box.set_static_text_with_pointer_check(text);
         self.text_box.move_to_text_end();
         self.compose = None;
+        self.text_changed = true;
         self.restore_placeholder_if_any();
     }
 

@@ -177,7 +177,6 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
         }
     }
 
-    /// Must be called after all writes for the frame and before the encoder is submitted.
     pub fn finish_belt(&mut self) {
         self.staging_belt.finish();
         self.dirty = false;

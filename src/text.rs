@@ -1033,7 +1033,6 @@ impl Text {
 
         self.prepare_decoration_quads(&mut encoder);
 
-        // Multi-window: mark prepared and check if all windows done.
         let should_clear_flags = {
             if let Some(window_info) = self.shared.windows.iter_mut().find(|info| info.window_id == window_id) {
                 window_info.prepared = true;
@@ -1064,8 +1063,6 @@ impl Text {
             return;
         }
         self.shared.decorations_dirty = false;
-
-        // Decoration quads: selection rects and cursor, done once for all boxes.
 
         let scratch = &mut self.shared.scratch_quads;
         scratch.clear();
@@ -1463,6 +1460,7 @@ impl Text {
                                 let te = self.text_edits.get_mut(i).unwrap();
                                 let tb = &mut te.text_box;
                                 if apply_shift_nav_op(&mut tb.selection, &tb.layout, event, action_mod).is_some() {
+                                    self.shared.reset_cursor_blink();
                                     return true;
                                 }
                             }
