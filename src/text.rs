@@ -1578,6 +1578,9 @@ impl Text {
                 SelectionDirection::Backward => self.text_boxes[current_key].prev_box,
             };
 
+            // Skip hidden linked boxes
+            let linked_key = linked_key.filter(|&k| !self.text_boxes[k].hidden);
+
             // Extend current box's selection to the boundary
             {
                 let current_box = &mut self.text_boxes[current_key];
@@ -1808,8 +1811,6 @@ impl Text {
             return true;
         }
 
-        // Cursor didn't move — it's at the text boundary of cursor_key.
-
         if cursor_key == focused_key {
             // Try to extend into a linked box in the direction of the operation.
             let next_key = if is_forward {
@@ -1817,6 +1818,7 @@ impl Text {
             } else {
                 self.text_boxes[focused_key].prev_box
             };
+            let next_key = next_key.filter(|&k| !self.text_boxes[k].hidden);
             if let Some(next_key) = next_key {
                 let entry = if is_forward { (0.0_f32, 0.0_f32) } else { (f32::MAX, f32::MAX) };
                 {
@@ -1865,6 +1867,7 @@ impl Text {
             } else {
                 self.text_boxes[cursor_key].prev_box
             };
+            let next_key = next_key.filter(|&k| !self.text_boxes[k].hidden);
             if let Some(next_key) = next_key {
                 let entry = if is_forward { (0.0_f32, 0.0_f32) } else { (f32::MAX, f32::MAX) };
                 {

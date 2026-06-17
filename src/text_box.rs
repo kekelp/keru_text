@@ -885,8 +885,6 @@ impl TextBox {
     }
 
     /// Sets the text box to use a group transform in addition to its own one.
-    ///
-    /// This function will only update the group transform if the new handle is different from the current one.
     pub fn set_group_transform(&mut self, transform: GroupTransformHandle) {
         if self.group_transform_index == Some(transform) {
             return;
@@ -908,8 +906,6 @@ impl TextBox {
     }
 
     /// Sets the translation (position) of the text box.
-    ///
-    /// This function will only update the translation if the new value is different from the current one.
     pub fn set_translation(&mut self, x: f32, y: f32) {
         if self.transform.translation == (x, y) {
             return;
@@ -921,8 +917,6 @@ impl TextBox {
     }
 
     /// Sets the rotation of the text box in radians.
-    ///
-    /// This function will only update the rotation if the new value is different from the current one.
     pub fn set_rotation(&mut self, radians: f32) {
         if self.transform.rotation == radians {
             return;
@@ -934,15 +928,17 @@ impl TextBox {
     }
 
     /// Hides or unhides the text box.
-    ///
-    /// This function will only update the hidden state if the new value is different from the current one.
-    pub(crate) fn set_hidden(&mut self, hidden: bool) {
+    pub fn set_hidden(&mut self, hidden: bool) {
         if self.hidden == hidden {
             return;
         }
         self.hidden = hidden;
         if hidden {
             self.reset_selection();
+            let focused = self.shared().focused;
+            if focused == Some(AnyBox::TextBox(self.key)) || focused == Some(AnyBox::TextEdit(self.key)) {
+                self.shared_mut().focused = None;
+            }
         }
         self.rebuild_hit_test_data();
     }
