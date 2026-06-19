@@ -1707,7 +1707,8 @@ impl TextEdit {
 
     /// Sets focus to this text edit.
     pub fn set_focus(&mut self) {
-        self.text_box.shared_mut().focused = Some(AnyBox::TextEdit(self.text_box.key));
+        let k = AnyBox::TextEdit(self.text_box.key);
+        self.text_box.shared_mut().refocus(Some(k));
     }
 }
 

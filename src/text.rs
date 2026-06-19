@@ -224,6 +224,41 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
+    pub(crate) fn refocus(&mut self, new_focus: Option<AnyBox>) {
+        let focus_changed = new_focus != self.focused;
+
+        if focus_changed {
+            // Clear multi-box selection and cross-box state when focus changes
+            self.multi_box_selection.clear();
+            self.cross_box_selection_anchor = None;
+            self.cross_box_cursor_key = None;
+
+            #[cfg(feature = "accessibility")]
+            {
+                let new_focus_ak_id = new_focus.and_then(|new_focus| self.get_accesskit_id(new_focus));
+                let old_focus_ak_id = self.focused.and_then(|old_focus| self.get_accesskit_id(old_focus));
+                self.accesskit_focus_tracker.new_focus = new_focus_ak_id;
+                self.accesskit_focus_tracker.old_focus = old_focus_ak_id;
+                self.accesskit_focus_tracker.event_number = self.current_event_number;
+            }
+
+            // Enable/disable IME based on whether a text edit is focused
+            // Todo: what if the user wants to do his own IME stuff?
+            if let Some(weak_window) = &self.window {
+                if let Some(window) = weak_window.upgrade() {
+                    let ime_allowed = matches!(new_focus, Some(AnyBox::TextEdit(_)));
+                    window.set_ime_allowed(ime_allowed);
+                }
+            }
+        }
+
+        self.focused = new_focus;
+
+        if focus_changed {
+            self.reset_cursor_blink();
+        }
+    }
+
     pub(crate) fn update_blink_timer(&mut self) {
         if let Some(start_time) = self.cursor_blink_start {
             let elapsed = Instant::now().duration_since(start_time);
@@ -1326,51 +1361,6 @@ impl Text {
         topmost
     }
 
-    fn refocus(&mut self, new_focus: Option<AnyBox>) {
-        let focus_changed = new_focus != self.shared.focused;
-
-        if focus_changed {
-            if let Some(old_focus) = self.shared.focused {
-                self.remove_focus(old_focus);
-            }
-
-            // Clear multi-box selection and cross-box state when focus changes
-            self.shared.multi_box_selection.clear();
-            self.shared.cross_box_selection_anchor = None;
-            self.shared.cross_box_cursor_key = None;
-
-            // If the new focus is a TextBox, add it to multi_box_selection
-            if let Some(AnyBox::TextBox(key)) = new_focus {
-                self.shared.multi_box_selection.push(key);
-            }
-
-            #[cfg(feature = "accessibility")]
-            {
-                let new_focus_ak_id = new_focus.and_then(|new_focus| self.get_accesskit_id(new_focus));
-                let old_focus_ak_id = self.shared.focused.and_then(|old_focus| self.get_accesskit_id(old_focus));
-                self.shared.accesskit_focus_tracker.new_focus = new_focus_ak_id;
-                self.shared.accesskit_focus_tracker.old_focus = old_focus_ak_id;
-                self.shared.accesskit_focus_tracker.event_number = self.shared.current_event_number;
-            }
-
-            // Enable/disable IME based on whether a text edit is focused
-            // Todo: what if the user wants to do his own IME stuff?
-            if let Some(weak_window) = &self.shared.window {
-                if let Some(window) = weak_window.upgrade() {
-                    let ime_allowed = matches!(new_focus, Some(AnyBox::TextEdit(_)));
-                    window.set_ime_allowed(ime_allowed);
-                }
-            }
-        }
-
-        self.shared.focused = new_focus;
-
-        if focus_changed {
-            // todo: could skip some rerenders here if the old focus wasn't editable and had collapsed selection.
-            self.shared.reset_cursor_blink();
-        }
-    }
-
     fn handle_click_counting(&mut self) {
         let now = Instant::now();
         let current_pos = self.input_state.mouse.cursor_pos;
@@ -1398,21 +1388,6 @@ impl Text {
             pos: current_pos,
             focused: self.shared.focused,
         });
-    }
-    
-    fn remove_focus(&mut self, old_focus: AnyBox) {
-        match old_focus {
-            AnyBox::TextEdit(i) => {
-                let handle = TextEditHandle { key: i };
-                let text_edit = self.get_text_edit_mut(&handle);
-                text_edit.text_box.reset_selection();
-                self.shared.cursor_blink_animation_currently_visible = false;
-            },
-            AnyBox::TextBox(i) => {
-                let handle = TextBoxHandle { key: i };
-                self.get_text_box_mut(&handle).reset_selection();
-            },
-        }
     }
     
     fn handle_scroll_event(&mut self, hovered: AnyBox, event: &WindowEvent, window: &Window) -> bool {
@@ -1671,7 +1646,7 @@ impl Text {
             }
             self.shared.multi_box_selection.clear();
 
-            self.refocus(new_focus);
+            self.shared.refocus(new_focus);
 
             // Set cross-box selection anchor for non-shift clicks on TextBox.
             if let Some(AnyBox::TextBox(key)) = new_focus {
@@ -2205,12 +2180,17 @@ impl Text {
     /// Sets focus to the specified text box.
     pub fn set_focus_to_text_box(&mut self, handle: &TextBoxHandle) {
         let handle: AnyBox = (*handle).get_anybox();
-        self.refocus(Some(handle));
+        self.shared.refocus(Some(handle));
     }
     /// Sets focus to the specified text edit.
     pub fn set_focus_to_text_edit(&mut self, handle: &TextEditHandle) {
         let handle: AnyBox = (*handle).get_anybox();
-        self.refocus(Some(handle));
+        self.shared.refocus(Some(handle));
+    }
+
+    /// Clear focus from any focused text box or text edit.
+    pub fn clear_focus(&mut self) {
+        self.shared.refocus(None);
     }
 
     #[cfg(feature = "accessibility")]

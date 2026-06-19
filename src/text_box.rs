@@ -1483,7 +1483,8 @@ impl TextBox {
 
     /// Sets focus to this text box.
     pub fn set_focus(&mut self) {
-        self.shared_mut().focused = Some(AnyBox::TextBox(self.key));
+        let k = AnyBox::TextBox(self.key);
+        self.shared_mut().refocus(Some(k));
     }
 }
 
