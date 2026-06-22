@@ -21,7 +21,7 @@ macro_rules! clear_placeholder_partial_borrows {
         if $self.showing_placeholder {
             $self.text_box.text_mut_string().clear();
             $self.showing_placeholder = false;
-            $self.text_box.refresh_layout(None);
+            $self.text_box.refresh_layout(None, $self.single_line);
             $self.text_box.move_to_text_start();
         }
     };
@@ -1316,6 +1316,16 @@ impl TextEdit {
         self.text_box.text_mut_string()
     }
 
+    /// Set a custom tag for this text box.
+    pub fn set_custom_tag(&mut self, custom_tag: Option<u64>) {
+        self.text_box.set_custom_tag(custom_tag);
+    }
+
+    /// Get the custom tag set to this text box, if any. 
+    pub fn custom_tag(&mut self) -> Option<u64> {
+        self.text_box.custom_tag()
+    }
+
     /// Sets the position of the text edit box.
     pub fn set_pos(&mut self, pos: (f64, f64)) {
         self.text_box.set_pos(pos);
@@ -1491,7 +1501,7 @@ impl TextEdit {
             None
         };
 
-        self.text_box.refresh_layout(color_override);
+        self.text_box.refresh_layout(color_override, self.single_line);
     }
 
     /// Set the text of the text edit box.

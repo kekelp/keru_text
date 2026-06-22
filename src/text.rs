@@ -221,6 +221,8 @@ pub(crate) struct Shared {
     pub(crate) scratch_quads: Vec<GlyphQuad>,
 
     pub(crate) changed_style_keys: Vec<usize>,
+    
+    pub(crate) pending_event_response: EventResponse,
 }
 
 impl Shared {
@@ -228,6 +230,9 @@ impl Shared {
         let focus_changed = new_focus != self.focused;
 
         if focus_changed {
+            self.pending_event_response.focus_lost = self.focused;
+            self.pending_event_response.focus_gained = new_focus;
+
             // Clear multi-box selection and cross-box state when focus changes
             self.multi_box_selection.clear();
             self.cross_box_selection_anchor = None;
@@ -434,28 +439,12 @@ impl MouseState {
 }
 
 /// A non-owning reference to either a `TextBox` or a `TextEditBox`.
-/// 
-///[`TextBoxHandle`] and [`TextEditHandle`] can be converted into `AnyBox`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnyBox {
     /// Text edit box
     TextEdit(usize),
     /// Text box
     TextBox(usize),
-}
-
-pub(crate) trait IntoAnyBox {
-    fn get_anybox(&self) -> AnyBox;
-}
-impl IntoAnyBox for TextBoxHandle {
-    fn get_anybox(&self) -> AnyBox {
-        AnyBox::TextBox(self.key)
-    }
-}
-impl IntoAnyBox for TextEditHandle {
-    fn get_anybox(&self) -> AnyBox {
-        AnyBox::TextEdit(self.key)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -606,6 +595,8 @@ impl Text {
                 window: None,
                 scratch_quads: Vec::with_capacity(40),
                 changed_style_keys: Vec::with_capacity(2),
+
+                pending_event_response: EventResponse::default()
             }),
         }
     }
@@ -1062,7 +1053,8 @@ impl Text {
                 text_box.needs_relayout = true;
             }
             if ! text_box.hidden() {
-                self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads, 4, &mut encoder);
+                let single_line = false;
+                self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads, 4, &mut encoder, single_line);
             }
         }
 
@@ -1135,8 +1127,8 @@ impl Text {
     }
 
     /// Returns `true` if the event was consumed by a text area.
-    pub fn handle_event(&mut self, event: &WindowEvent, window: &Window) -> bool {
-        let mut event_consumed = false;
+    pub fn handle_event(&mut self, event: &WindowEvent, window: &Window) -> EventResponse {
+        self.shared.pending_event_response = EventResponse::default();
 
         self.shared.current_event_number += 1;
         
@@ -1195,7 +1187,7 @@ impl Text {
             if state.is_pressed() && *button == MouseButton::Left {
                 let new_focus = self.find_topmost_selectable_at_pos_for_window(self.input_state.mouse.cursor_pos, window.id());
                 if new_focus.is_some() {
-                    event_consumed = true;
+                    self.shared.pending_event_response.consumed = true;
                 }
                 handled_shift_click = self.handle_left_click(new_focus);
                 self.handle_click_counting();
@@ -1206,7 +1198,7 @@ impl Text {
             let hovered = self.find_topmost_selectable_at_pos_for_window(self.input_state.mouse.cursor_pos, window.id());
             if let Some(hovered_widget) = hovered {
                 let consumed = self.handle_scroll_event(hovered_widget, event, window);
-                event_consumed |= consumed;
+                self.shared.pending_event_response.consumed |= consumed;
             }
         }
 
@@ -1232,7 +1224,7 @@ impl Text {
 
                 if focused_belongs_to_window {
                     let consumed = self.handle_focused_event(focused, event, window);
-                    event_consumed |= consumed;
+                    self.shared.pending_event_response.consumed |= consumed;
 
                     #[cfg(feature = "accessibility")] {
                         // todo: not the best, this includes decoration changes and stuff.
@@ -1244,7 +1236,7 @@ impl Text {
             }
         }
 
-        return event_consumed;
+        return self.shared.pending_event_response;
     }
 
     fn find_topmost_selectable_at_pos_for_window(&self, cursor_pos: (f64, f64), window_id: WindowId) -> Option<AnyBox> {
@@ -1306,14 +1298,24 @@ impl Text {
         }
     }
 
+    /// Get the custom tag previously set on a box with [`TextBox::set_custom_tag`]
+    /// or [`TextEdit::set_custom_tag`].
+    pub fn get_custom_tag(&self, any_box: &AnyBox) -> Option<u64> {
+        match any_box {
+            AnyBox::TextEdit(i) => self.text_edits.get(*i).and_then(|te| te.text_box.custom_tag),
+            AnyBox::TextBox(i) => self.text_boxes.get(*i).and_then(|tb| tb.custom_tag),
+        }
+    }
+
     /// Handle window events with a pre-determined topmost text box.
     /// 
     /// Use this in cases where text boxes might be occluded by other objects.
     /// Pass `Some(text_box_id)` if a text box should receive the event, or `None` if it's occluded.
     /// 
     /// If the text box is occluded, this function should still be called with `None`, so that other text boxes can defocus.
-    pub fn handle_event_with_topmost(&mut self, event: &WindowEvent, window: &Window, topmost_text_box: Option<AnyBox>) {        
-        // todo: add "consumed" here 
+    pub fn handle_event_with_topmost(&mut self, event: &WindowEvent, window: &Window, topmost_text_box: Option<AnyBox>) -> EventResponse {
+        self.shared.pending_event_response = EventResponse::default();
+
         self.input_state.handle_event(event);
 
         // update smooth scrolling animations
@@ -1327,6 +1329,9 @@ impl Text {
         let mut handled_shift_click = false;
         if let WindowEvent::MouseInput { state, button, .. } = event {
             if state.is_pressed() && *button == MouseButton::Left {
+                if topmost_text_box.is_some() {
+                    self.shared.pending_event_response.consumed = true;
+                }
                 handled_shift_click = self.handle_left_click(topmost_text_box);
                 self.handle_click_counting();
             }
@@ -1334,15 +1339,19 @@ impl Text {
 
         if let WindowEvent::MouseWheel { .. } = event {
             if let Some(hovered_widget) = topmost_text_box {
-                self.handle_scroll_event(hovered_widget, event, window);
+                let consumed = self.handle_scroll_event(hovered_widget, event, window);
+                self.shared.pending_event_response.consumed |= consumed;
             }
         }
 
         if !handled_shift_click {
             if let Some(focused) = self.shared.focused {
-                self.handle_focused_event(focused, event, window);
+                let consumed = self.handle_focused_event(focused, event, window);
+                self.shared.pending_event_response.consumed |= consumed;
             }
         }
+
+        return self.shared.pending_event_response;
     }
 
     fn find_topmost_at_pos(&self, cursor_pos: (f64, f64)) -> Option<AnyBox> {
@@ -2176,18 +2185,6 @@ impl Text {
         }
     }
 
-    // todo: would be a lot nicer to have these as methods on TextBoxMut and TextEditMut, but is it worth carrying the key around just for this?
-    /// Sets focus to the specified text box.
-    pub fn set_focus_to_text_box(&mut self, handle: &TextBoxHandle) {
-        let handle: AnyBox = (*handle).get_anybox();
-        self.shared.refocus(Some(handle));
-    }
-    /// Sets focus to the specified text edit.
-    pub fn set_focus_to_text_edit(&mut self, handle: &TextEditHandle) {
-        let handle: AnyBox = (*handle).get_anybox();
-        self.shared.refocus(Some(handle));
-    }
-
     /// Clear focus from any focused text box or text edit.
     pub fn clear_focus(&mut self) {
         self.shared.refocus(None);
@@ -2459,4 +2456,15 @@ impl CursorBlinkWaker {
     fn stop(&self) {
         let _ = self.command_sender.send(WakerCommand::Stop);
     }
+}
+
+/// The result of handling a `winit::WindowEvent` with [`Text::handle_event()`].
+#[derive(Clone, Copy, Default)]
+pub struct EventResponse {
+    /// Whether the event was consumed by a text box (and should not be handled further by the caller).
+    pub consumed: bool,
+    /// The box that gained focus as a result of this event, if any.
+    pub focus_gained: Option<AnyBox>,
+    /// The box that lost focus as a result of this event, if any.
+    pub focus_lost: Option<AnyBox>,
 }

@@ -502,10 +502,10 @@ impl RenderData {
         if had_relayout { self.stats.relayouts += 1; }
         if had_relayout { text_edit.text_box.needs_quad_rebuild = true; }
 
-        self.prepare_text_box_layout(&mut text_edit.text_box, scratch, 20, encoder);
+        self.prepare_text_box_layout(&mut text_edit.text_box, scratch, 20, encoder, text_edit.single_line);
     }
 
-    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, scratch: &mut Vec<GlyphQuad>, spare_capacity: u32, encoder: &mut wgpu::CommandEncoder) {
+    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, scratch: &mut Vec<GlyphQuad>, spare_capacity: u32, encoder: &mut wgpu::CommandEncoder, single_line: bool) {
         let w = self.params.screen_resolution_width;
         let h = self.params.screen_resolution_height;
         let t = text_box.transform.translation;
@@ -529,7 +529,7 @@ impl RenderData {
         
         let _needs_relayout = text_box.needs_relayout();
 
-        text_box.refresh_layout(None);
+        text_box.refresh_layout(None, single_line);
         
         #[cfg(debug_assertions)] {
             if _needs_relayout {

@@ -95,6 +95,8 @@ pub struct TextBox {
     /// Per-range style overrides applied on top of the base style during layout.
     pub(crate) ranged_style_properties: Vec<(StyleProperty<'static, ColorBrush>, std::ops::Range<usize>)>,
     pub(crate) style_property_overrides: Vec<StyleProperty<'static, ColorBrush>>,
+
+    pub(crate) custom_tag: Option<u64>,
 }
 
 /// Metadata for the render data of a text box
@@ -196,6 +198,7 @@ impl TextBox {
             prev_box: None,
             ranged_style_properties: Vec::with_capacity(3),
             style_property_overrides: Vec::with_capacity(3),
+            custom_tag: None,
         }
     }
 
@@ -522,7 +525,7 @@ impl TextBox {
                         let old_scroll = self.scroll_offset.1;
                         let new_scroll = old_scroll - scroll_amount;
 
-                        self.refresh_layout(None);
+                        self.refresh_layout(None, false);
                         let total_text_height = self.layout.height();
                         let text_height = self.height;
                         let max_scroll = (total_text_height - text_height).max(0.0).round();
@@ -848,6 +851,16 @@ impl TextBox {
         self.accesskit_id
     }
 
+    /// Set a custom tag for this text box.
+    pub fn set_custom_tag(&mut self, custom_tag: Option<u64>) {
+        self.custom_tag = custom_tag;
+    }
+
+    /// Get the custom tag set to this text box, if any. 
+    pub fn custom_tag(&mut self) -> Option<u64> {
+        self.custom_tag
+    }
+
     /// Sets the position of the text box.
     ///
     /// This function will only update the position if the new value is different from the current one.
@@ -1086,16 +1099,16 @@ impl TextBox {
         }
 
         let mut layout = builder.build(&self.text);
-        if ! single_line {
-            layout.break_all_lines(Some(self.max_advance));
-            layout.align(
-                Some(self.max_advance),
-                self.alignment,
-                AlignmentOptions::default(),
-            );
-        } else {
-            layout.break_all_lines(None);
-        }
+
+        let max_advance = if single_line { None } else { Some(self.max_advance) };
+
+        layout.break_all_lines(max_advance);
+        
+        layout.align(
+            max_advance,
+            self.alignment,
+            AlignmentOptions::default(),
+        );
 
         self.layout = layout;
         self.needs_relayout = false;
@@ -1443,15 +1456,15 @@ impl TextBox {
 
     /// Returns the layout, refreshing it if needed.
     pub fn layout(&mut self) -> &Layout<ColorBrush> {
-        self.refresh_layout(None);
+        self.refresh_layout(None, false);
         &self.layout
     }
     
     // todo better comment.
     /// Refresh the layout.
-    pub fn refresh_layout(&mut self, color_override: Option<ColorBrush>) {
+    pub fn refresh_layout(&mut self, color_override: Option<ColorBrush>, single_line: bool) {
         if self.needs_relayout() {
-            self.rebuild_layout(color_override, false);
+            self.rebuild_layout(color_override, single_line);
             self.needs_quad_rebuild = true;
         }
     }
