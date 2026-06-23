@@ -1,9 +1,5 @@
 use crate::*;
-#[cfg(feature = "accessibility")]
-use accesskit::{NodeId, TreeUpdate};
 use slab::Slab;
-#[cfg(feature = "accessibility")]
-use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::ptr::NonNull;
 use std::sync::mpsc;
@@ -57,9 +53,6 @@ pub struct Text {
     pub(crate) renderer: TextRenderer,
 
     pub(crate) encoder: Option<wgpu::CommandEncoder>,
-
-    #[cfg(feature = "accessibility")]
-    pub(crate) accesskit_id_to_text_handle_map: HashMap<NodeId, AnyBox>,
 
     /// Internal buffer for collecting selected text across multiple boxes.
     selected_text_buffer: String,
@@ -199,17 +192,11 @@ pub(crate) struct Shared {
     pub font_cx: FontContext,
 
     pub decorations_dirty: bool,
-
+    
     // Throttle paste to once per frame to avoid layout rebuild spam.
     pub pasted_this_frame: bool,
-
-    #[cfg(feature = "accessibility")]
-    pub accesskit_tree_update: TreeUpdate,
-    #[cfg(feature = "accessibility")]
-    pub accesskit_focus_tracker: FocusChange,
+    
     pub current_event_number: u64,
-    #[cfg(feature = "accessibility")]
-    pub node_id_generator: fn() -> NodeId,
 
     // Cursor blink state
     pub cursor_blink_start: Option<Instant>,
@@ -237,15 +224,6 @@ impl Shared {
             self.multi_box_selection.clear();
             self.cross_box_selection_anchor = None;
             self.cross_box_cursor_key = None;
-
-            #[cfg(feature = "accessibility")]
-            {
-                let new_focus_ak_id = new_focus.and_then(|new_focus| self.get_accesskit_id(new_focus));
-                let old_focus_ak_id = self.focused.and_then(|old_focus| self.get_accesskit_id(old_focus));
-                self.accesskit_focus_tracker.new_focus = new_focus_ak_id;
-                self.accesskit_focus_tracker.old_focus = old_focus_ak_id;
-                self.accesskit_focus_tracker.event_number = self.current_event_number;
-            }
 
             // Enable/disable IME based on whether a text edit is focused
             // Todo: what if the user wants to do his own IME stuff?
@@ -306,21 +284,8 @@ impl Shared {
     }
 }
 
-#[cfg(feature = "accessibility")]
-pub(crate) struct FocusChange {
-    new_focus: Option<NodeId>,
-    old_focus: Option<NodeId>,
-    event_number: u64,
-}
-#[cfg(feature = "accessibility")]
-impl FocusChange {
-    pub(crate) fn new() -> FocusChange {
-        FocusChange { new_focus: None, old_focus: None, event_number: 0 }
-    }
-}
-
 /// Handle for a text edit box.
-/// 
+///
 /// Obtained when creating a text edit box with [`Text::add_text_edit()`].
 /// 
 /// Use with [`Text::get_text_edit()`] to get a reference to the corresponding [`TextEdit`]. 
@@ -364,6 +329,8 @@ impl TextBoxHandle {
     pub fn to_cloned(&self) -> ClonedTextBoxHandle {
         ClonedTextBoxHandle { key: self.key }
     }
+    /// The slab key identifying this text box.
+    pub fn key(&self) -> usize { self.key }
 }
 
 impl TextEditHandle {
@@ -371,6 +338,8 @@ impl TextEditHandle {
     pub fn to_cloned(&self) -> ClonedTextEditHandle {
         ClonedTextEditHandle { key: self.key }
     }
+    /// The slab key identifying this text edit.
+    pub fn key(&self) -> usize { self.key }
 }
 
 
@@ -559,9 +528,6 @@ impl Text {
             encoder: None,
             renderer,
 
-            #[cfg(feature = "accessibility")]
-            accesskit_id_to_text_handle_map: HashMap::with_capacity(50),
-
             selected_text_buffer: String::with_capacity(25),
 
             shared: Box::new(Shared {
@@ -578,17 +544,7 @@ impl Text {
                 font_cx: FontContext::new(),
                 decorations_dirty: false,
                 pasted_this_frame: false,
-                #[cfg(feature = "accessibility")]
-                accesskit_focus_tracker: FocusChange::new(),
                 current_event_number: 1,
-                #[cfg(feature = "accessibility")]
-                node_id_generator: crate::accessibility::next_node_id,
-                #[cfg(feature = "accessibility")]
-                accesskit_tree_update: TreeUpdate {
-                    nodes: Vec::with_capacity(4),
-                    tree: None,
-                    focus: NodeId(0),
-                },
                 cursor_blink_start: None,
                 cursor_blink_animation_currently_visible: false,
                 cursor_blink_waker: None,
@@ -798,6 +754,7 @@ impl Text {
         return &mut self.text_edits[handle.key];
     }
 
+
     /// Get a reference to a text edit.
     /// 
     /// `handle` is the handle that was returned when first creating the text edit with [`Text::add_text_edit()`] or similar functions.
@@ -888,15 +845,7 @@ impl Text {
                 self.shared.focused = None;
             }
         }
-        
-        // Remove from accessibility mapping if it exists
-        #[cfg(feature = "accessibility")]
-        if let Some(text_box) = self.text_boxes.get(handle.key) {
-            if let Some(accesskit_id) = text_box.accesskit_id {
-                self.accesskit_id_to_text_handle_map.remove(&accesskit_id);
-            }
-        }
-        
+
         let text_box = self.text_boxes.remove(handle.key);
 
         let box_data_i = text_box.render_data_info.box_index;
@@ -914,14 +863,6 @@ impl Text {
         if let Some(AnyBox::TextEdit(i)) = self.shared.focused {
             if i == handle.key {
                 self.shared.focused = None;
-            }
-        }
-
-        // Remove from accessibility mapping if it exists
-        #[cfg(feature = "accessibility")]
-        if let Some((_text_edit, text_box)) = self.text_edits.get(handle.key) {
-            if let Some(accesskit_id) = text_box.accesskit_id {
-                self.accesskit_id_to_text_handle_map.remove(&accesskit_id);
             }
         }
 
@@ -1225,13 +1166,6 @@ impl Text {
                 if focused_belongs_to_window {
                     let consumed = self.handle_focused_event(focused, event, window);
                     self.shared.pending_event_response.consumed |= consumed;
-
-                    #[cfg(feature = "accessibility")] {
-                        // todo: not the best, this includes decoration changes and stuff.
-                        if self.need_rerender() {
-                            self.push_ak_update_for_focused(focused);
-                        }
-                    }
                 }
             }
         }
@@ -1255,22 +1189,6 @@ impl Text {
         }
 
         topmost
-    }
-
-    #[cfg(feature = "accessibility")]
-    fn get_accesskit_id(&mut self, i: AnyBox) -> Option<NodeId> {
-        return match i {
-            AnyBox::TextEdit(i) => {
-                let handle = TextEditHandle { key: i };
-                let text_edit = get_full_text_edit_partial_borrows(&mut self.text_edits, &mut self.shared, &handle);
-                text_edit.accesskit_id()
-            },
-            AnyBox::TextBox(i) => {
-                let handle = TextBoxHandle { key: i };
-                let text_box = get_full_text_box_partial_borrows(&mut self.text_boxes, &mut self.shared, &handle);
-                text_box.accesskit_id()
-            },
-        }
     }
 
     /// Find the topmost text box that would receive mouse events, if it wasn't occluded by any non-text-box objects.
@@ -1920,6 +1838,11 @@ impl Text {
         return &mut self.text_boxes[handle.key];
     }
 
+    /// Get a mutable reference to a text box by its raw slab key (see [`TextBoxHandle::key`]).
+    pub fn get_text_box_mut_by_key(&mut self, key: usize) -> &mut TextBox {
+        return &mut self.text_boxes[key];
+    }
+
 
     /// Get a mutable reference to a text box wrapped with its style.
     /// 
@@ -2190,57 +2113,6 @@ impl Text {
         self.shared.refocus(None);
     }
 
-    #[cfg(feature = "accessibility")]
-    /// Sets the accessibility ID for a text box.
-    pub fn set_text_box_accesskit_id(&mut self, handle: &TextBoxHandle, accesskit_id: NodeId) {
-        let any_box = handle.keynto_anybox();
-        self.accesskit_id_to_text_handle_map.insert(accesskit_id, any_box);
-        self.get_text_box_mut(handle).set_accesskit_id(accesskit_id);
-    }
-    
-    #[cfg(feature = "accessibility")]
-    /// Sets the accessibility ID for a text edit.
-    pub fn set_text_edit_accesskit_id(&mut self, handle: &TextEditHandle, accesskit_id: NodeId) {
-        let any_box = handle.keynto_anybox();
-        self.accesskit_id_to_text_handle_map.insert(accesskit_id, any_box);
-        self.get_text_edit_mut(handle).set_accesskit_id(accesskit_id);
-    }
-    
-    /// Get the text handle for a given AccessKit node ID
-    #[cfg(feature = "accessibility")]
-    pub(crate) fn get_text_handle_by_accesskit_id(&self, node_id: NodeId) -> Option<AnyBox> {
-        self.accesskit_id_to_text_handle_map.get(&node_id).copied()
-    }
-
-    #[cfg(feature = "accessibility")]
-    /// Sets focus by accessibility node ID.
-    pub fn set_focus_by_accesskit_id(&mut self, focus: NodeId) {
-        if let Some(focused_text_handle) = self.get_text_handle_by_accesskit_id(focus) {
-            self.set_focus(&focused_text_handle);
-        }
-    }
-    
-    /// Set a custom node ID generator function for accessibility
-    /// 
-    /// The generator function will be called whenever a new accessibility node ID is needed.
-    /// This allows you to control the node ID allocation strategy.
-    /// 
-    /// # Example
-    /// ```ignore
-    /// use accesskit::NodeId;
-    /// 
-    /// fn my_generator() -> NodeId {
-    ///     // Your custom logic here
-    ///     NodeId(42)
-    /// }
-    /// 
-    /// text.set_node_id_generator(my_generator);
-    /// ```
-    #[cfg(feature = "accessibility")]
-    pub fn set_node_id_generator(&mut self, generator: fn() -> NodeId) {
-        self.shared.node_id_generator = generator;
-    }
-
     /// Returns the currently focused text widget, if any.
     pub fn focus(&self) -> Option<AnyBox> {
         self.shared.focused
@@ -2284,106 +2156,6 @@ impl Text {
         Some(family.name().to_string())
     }
 
-    #[cfg(feature = "accessibility")]
-    /// Returns the accessibility node ID of the currently focused text element.
-    pub fn focused_accesskit_id(&self) -> Option<NodeId> {
-        if let Some(focused) = self.shared.focused {
-            match focused {
-                AnyBox::TextEdit(i) => {
-                    if let Some((_text_edit, text_box)) = self.text_edits.get(i) {
-                        text_box.accesskit_id
-                    } else {
-                        None
-                    }
-                }
-                AnyBox::TextBox(i) => {
-                    if let Some(text_box) = self.text_boxes.get(i as usize) {
-                        text_box.accesskit_id
-                    } else {
-                        None
-                    }
-                }
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Returns an Accesskit update for all the changes to the text content that happened since the last update, or `None` if nothing happened at all.
-    /// 
-    /// It can be very hard to understand what actually happened to the focus from the data in the `accesskit::TreeUpdate` alone, so this function also returns a [`FocusUpdate`]. It might be wiser for users of this function to read the value of `FocusUpdate` and fill in the value of `TreeUpdate`'s `focus` themselves.
-    /// 
-    /// In particular, if the user clicks outside of all text boxes, the `TreeUpdate`'s `focus` will be set to `root_node_id`, because that's what Accesskit wants to signal that nothing is focused anymore. But this means that if the focus went to some other non-text element in the GUI library, the GUI library will have to send its update *after* this one, or it will be overwritten by the `root_node_id`. 
-    /// 
-    /// Ideally, Accesskit would allow `Text` to report that a `NodeId` just lost focus, and figure out itself what to do from there. (Actually, it would probably be a list of nodes that definitely don't have focus anymore. I guess that would be a bit complicated.)
-    #[cfg(feature = "accessibility")]
-    pub fn accesskit_update(&mut self, current_focused_node_id: Option<NodeId>, root_node_id: NodeId) -> Option<(TreeUpdate, FocusUpdate)> {
-        // For some reason, every update that we send must specify the focus again.
-        // If something else changed it, we'd end up overriding it.
-        // So we have to ask for the current one from outside and fill that in, in case that nothing happened.
-        // According to the TreeUpdate docs, we should also set focus = root_node_id when text boxes are defocused.
-        // However, this means that the focus actually goes to the whole window, Windows Narrator says the name of the window, and the blue box covers the whole window. I don't really see this behavior anywhere else.
-
-        let mut focus_update = FocusUpdate::Unchanged;
-
-        let old_focus = self.shared.accesskit_focus_tracker.old_focus;
-        let new_focus = self.shared.accesskit_focus_tracker.new_focus;
-
-        if old_focus != new_focus {
-            focus_update = FocusUpdate::Changed { old_focus, new_focus };
-        }
-        
-        // Make a different focus update to try to figure out the least wrong thing to stick in the TreeUpdate.
-        let mut focus_update_for_tree = focus_update;
-
-        // If the focus update is old, it might be riskier to even report it. Not sure, though.
-        let focus_update_is_fresh = self.shared.current_event_number == self.shared.accesskit_focus_tracker.event_number;
-        if ! focus_update_is_fresh {
-            focus_update_for_tree = FocusUpdate::Unchanged;
-        }
-
-        if (focus_update_for_tree == FocusUpdate::Unchanged) && self.shared.accesskit_tree_update.nodes.is_empty() {
-            return None;
-        }
-
-        let current_focused_node_id = current_focused_node_id.unwrap_or(root_node_id);
-
-        let focus_value_for_tree = match focus_update_for_tree {
-            FocusUpdate::Changed { old_focus: _, new_focus } => {
-                if let Some(new_focus) = new_focus {
-                    new_focus
-                } else {
-                    root_node_id
-                }
-            }
-            FocusUpdate::Unchanged => current_focused_node_id,
-        };
-
-        self.shared.accesskit_tree_update.focus = focus_value_for_tree;
-        let res = self.shared.accesskit_tree_update.clone();
-
-        // Reset to an empty update.
-        self.shared.accesskit_tree_update.nodes.clear();
-        self.shared.accesskit_tree_update.tree = None;
-
-        return Some((res, focus_update));
-    }
-
-    #[cfg(feature = "accessibility")]
-    fn push_ak_update_for_focused(&mut self, focused: AnyBox) {
-        match focused {
-            AnyBox::TextEdit(i) => {
-                let handle = TextEditHandle { i };
-                let mut text_edit = self.get_text_edit_mut(&handle);
-                text_edit.push_accesskit_update_to_self();
-            },
-            AnyBox::TextBox(i) => {
-                let handle = TextBoxHandle { i };
-                let mut text_box = self.get_text_box_mut(&handle);
-                text_box.push_accesskit_update_to_self();
-            },
-        }
-    }
 }
 
 // todo: get this from system settings.

@@ -129,7 +129,7 @@ mod gpu_heap;
 pub(crate) use gpu_heap::*;
 
 #[cfg(feature = "accessibility")]
-mod accessibility;
+pub mod accessibility;
 #[cfg(feature = "accessibility")]
 pub use accessibility::*;
 

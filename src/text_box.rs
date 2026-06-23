@@ -1,7 +1,7 @@
 use std::{cell::RefCell, ptr::NonNull};
 
 #[cfg(feature = "accessibility")]
-use accesskit::{Node, NodeId, Rect as AccessRect, Role, TreeUpdate};
+use accesskit::{Node, NodeId};
 
 use parley::*;
 use winit::{
@@ -42,8 +42,6 @@ pub struct TextBox {
 
     #[cfg(feature = "accessibility")]
     pub(crate) layout_access: LayoutAccessibility,
-    #[cfg(feature = "accessibility")]
-    pub(crate) accesskit_id: Option<accesskit::NodeId>,
 
     pub(crate) transform: Transform2D,
     // should get rid of it and have it only in the BoxData
@@ -165,8 +163,6 @@ impl TextBox {
             layout: Layout::new(),
             #[cfg(feature = "accessibility")]
             layout_access: LayoutAccessibility::default(),
-            #[cfg(feature = "accessibility")]
-            accesskit_id: None,
             selectable: true,
             needs_relayout: true,
             transform: position,
@@ -267,43 +263,6 @@ impl TextBox {
         }
 
         false
-    }
-}
-
-#[cfg(feature = "accessibility")]
-impl TextBox {
-    pub fn accesskit_node(&self) -> Node {
-        let mut node = Node::new(Role::Label);
-        // let mut node = Node::new(Role::Paragraph);
-        let text_content = self.text.to_string();
-        node.set_value(text_content.clone());
-        node.set_description(text_content);
-
-        // Transform all four corners of the text box bounds to screen space
-        let width = self.layout.width();
-        let height = self.layout.height();
-
-        let top_left = self.transform.transform_point(euclid::Point2D::new(0.0, 0.0));
-        let top_right = self.transform.transform_point(euclid::Point2D::new(width, 0.0));
-        let bottom_left = self.transform.transform_point(euclid::Point2D::new(0.0, height));
-        let bottom_right = self.transform.transform_point(euclid::Point2D::new(width, height));
-
-        // Compute the axis-aligned bounding box of the transformed corners
-        let min_x = top_left.x.min(top_right.x).min(bottom_left.x).min(bottom_right.x);
-        let max_x = top_left.x.max(top_right.x).max(bottom_left.x).max(bottom_right.x);
-        let min_y = top_left.y.min(top_right.y).min(bottom_left.y).min(bottom_right.y);
-        let max_y = top_left.y.max(top_right.y).max(bottom_left.y).max(bottom_right.y);
-
-        let bounds = AccessRect::new(
-            min_x as f64,
-            min_y as f64,
-            max_x as f64,
-            max_y as f64
-        );
-
-        node.set_bounds(bounds);
-
-        return node;
     }
 }
 
@@ -468,38 +427,34 @@ impl TextBox {
     }
 
     #[cfg(feature = "accessibility")]
-    /// Pushes an accessibility update for this text box.
-    pub fn push_accesskit_update(&mut self, tree_update: &mut TreeUpdate) {
-        let accesskit_id = self.accesskit_id;
-        let node = self.accesskit_node();
-        let (left, top) = self.pos();
-        
-        push_accesskit_update_text_box_partial_borrows(
-            accesskit_id,
-            node,
-            &mut self,
-            tree_update,
-            left,
-            top,
-            self.shared.node_id_generator,
+    /// Fills `parent_node` with TextRun children and pushes the child nodes into `out`.
+    /// Call this from your accessibility tree builder after creating the parent node.
+    pub fn build_accesskit_nodes(
+        &mut self,
+        parent_node: &mut Node,
+        out: &mut Vec<(NodeId, Node)>,
+        x: f64,
+        y: f64,
+        mut next_node_id: impl FnMut() -> NodeId,
+    ) {
+        self.refresh_layout(None, false);
+        let mut dummy = accesskit::TreeUpdate {
+            nodes: Vec::new(),
+            tree: None,
+            tree_id: accesskit::TreeId::ROOT,
+            focus: NodeId(0),
+        };
+        self.layout_access.build_nodes(
+            &self.text,
+            &self.layout,
+            &mut dummy,
+            parent_node,
+            &mut next_node_id,
+            x,
+            y,
+            |_, _| {},
         );
-    }
-
-    #[cfg(feature = "accessibility")]
-    pub(crate) fn push_accesskit_update_to_self(&mut self) {
-        let accesskit_id = self.accesskit_id;
-        let node = self.accesskit_node();
-        let (left, top) = self.pos();
-        
-        push_accesskit_update_text_box_partial_borrows(
-            accesskit_id,
-            node,
-            &mut self,
-            &mut self.shared.accesskit_tree_update,
-            left,
-            top,
-            self.shared.node_id_generator,
-        );
+        out.extend(dummy.nodes);
     }
 
     pub(crate) fn handle_event(&mut self, event: &WindowEvent, _window: &Window, input_state: &TextInputState) -> bool {
@@ -837,18 +792,6 @@ impl TextBox {
         self.needs_relayout = true;
         self.ranged_style_properties.clear();
         self.text = Cow::Borrowed(text);
-    }
-
-    #[cfg(feature = "accessibility")]
-    /// Sets the accessibility node ID for this text box.
-    pub fn set_accesskit_id(&mut self, accesskit_id: NodeId) {
-        self.accesskit_id = Some(accesskit_id);
-    }
-
-    #[cfg(feature = "accessibility")]
-    /// Returns the accessibility node ID for this text box.
-    pub fn accesskit_id(&self) -> Option<NodeId> {
-        self.accesskit_id
     }
 
     /// Set a custom tag for this text box.
@@ -1481,19 +1424,6 @@ impl TextBox {
         self.selectable = selectable;
     }
     
-    #[cfg(feature = "accessibility")]
-    /// Sets the text selection based on an accesskit selection.
-    pub fn select_from_accesskit(&mut self, selection: &accesskit::TextSelection) {
-        self.refresh_layout();
-        if let Some(selection) = Selection::from_access_selection(
-            selection,
-            &self.layout,
-            &self.layout_access,
-        ) {
-            self.set_selection(selection);
-        }
-    }
-
     /// Sets focus to this text box.
     pub fn set_focus(&mut self) {
         let k = AnyBox::TextBox(self.key);
@@ -1578,33 +1508,5 @@ impl SelectionExt for Selection {
     }
 }
 
-#[cfg(feature = "accessibility")]
-fn push_accesskit_update_text_box_partial_borrows(
-    accesskit_id: Option<accesskit::NodeId>,
-    mut node: accesskit::Node,
-    inner: &mut TextBox,
-    tree_update: &mut accesskit::TreeUpdate,
-    left: f64,
-    top: f64,
-    node_id_generator: fn() -> accesskit::NodeId,
-) {
-    if let Some(id) = accesskit_id {
-        inner.layout_access.build_nodes(
-            &inner.text,
-            &inner.layout,
-            tree_update,
-            &mut node,
-            node_id_generator,
-            left,
-            top,
-        );
-
-        if let Some(ak_sel) = inner.selection.to_access_selection(&inner.layout, &inner.layout_access) {
-            node.set_text_selection(ak_sel);
-        }
-
-        tree_update.nodes.push((id, node))
-    }
-}
 
 

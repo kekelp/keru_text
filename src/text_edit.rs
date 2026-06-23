@@ -7,9 +7,6 @@ use winit::{
     event::{Ime, Touch, WindowEvent}, keyboard::{Key, NamedKey}, platform::modifier_supplement::KeyEventExtModifierSupplement, window::Window
 };
 
-#[cfg(feature = "accessibility")]
-use accesskit::{Node, NodeId, Rect as AccessRect, Role, TreeUpdate};
-
 pub(crate) const CURSOR_WIDTH: f32 = 3.0;
 pub (crate) const CURSOR_COLOR: u32 = 0xee_ee_ee_ff;
 
@@ -210,18 +207,6 @@ impl TextEdit {
     /// Sets whether the text edit is disabled.
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
-    }
-
-    #[cfg(feature = "accessibility")]
-    /// Sets the accessibility node ID for this text edit.
-    pub fn set_accesskit_id(&mut self, accesskit_id: NodeId) {
-        self.text_box.accesskit_id = Some(accesskit_id);
-    }
-
-    #[cfg(feature = "accessibility")]
-    /// Returns the accessibility node ID for this text edit.
-    pub fn accesskit_id(&self) -> Option<NodeId> {
-        self.text_box.accesskit_id
     }
 
     pub(crate) fn handle_event_editable(&mut self, event: &WindowEvent, window: &Window, input_state: &TextInputState) -> bool {
@@ -860,41 +845,6 @@ impl TextEdit {
     pub fn size(&self) -> (f32, f32) {
         self.text_box.size()
     }
-
-    #[cfg(feature = "accessibility")]
-    /// Pushes an accessibility update for this text edit.
-    pub fn push_accesskit_update(&mut self, tree_update: &mut TreeUpdate) {
-        let accesskit_id = self.text_box.accesskit_id;
-        let node = self.accesskit_node();
-        let (left, top) = self.pos();
-        
-        push_accesskit_update_textedit_partial_borrows(
-            accesskit_id,
-            node,
-            &mut self.text_box,
-            tree_update,
-            left,
-            top,
-            self.text_box.shared_mut().node_id_generator,
-        );
-    }
-
-    #[cfg(feature = "accessibility")]
-    pub(crate) fn push_accesskit_update_to_self(&mut self) {
-        let accesskit_id = self.text_box.accesskit_id;
-        let node = self.accesskit_node();
-        let (left, top) = self.pos();
-        
-        push_accesskit_update_textedit_partial_borrows(
-            accesskit_id,
-            node,
-            &mut self.text_box,
-            &mut self.text_box.shared_mut().accesskit_tree_update,
-            left,
-            top,
-            self.text_box.shared_mut().node_id_generator,
-        );
-    }
 }
 
 
@@ -1143,48 +1093,6 @@ fn remove_newlines_inplace(text: &mut String) -> bool {
     }
 
     return changed;
-}
-
-#[cfg(feature = "accessibility")]
-impl_for_textedit_and_texteditmut! {
-    pub fn accesskit_node(&self) -> Node {
-        let mut node = if self.single_line() {
-            Node::new(Role::TextInput)
-        } else {
-            Node::new(Role::MultilineTextInput)
-        };
-
-        if self.showing_placeholder() {
-            node.set_value(String::new());
-            if let Some(placeholder) = &self.placeholder_text {
-                node.set_description(placeholder.to_string());
-            }
-        } else {
-            node.set_value(self.text_box.text.to_string());
-        }
-        
-        let (left, top) = self.text_box.pos();
-        let bounds = AccessRect::new(
-            left,
-            top,
-            left + self.text_box.width as f64,
-            top + self.text_box.height as f64,
-        );
-        node.set_bounds(bounds);
-
-        if self.disabled() {
-            node.set_disabled();
-        }
-        
-        node.add_action(accesskit::Action::Focus);
-        node.add_action(accesskit::Action::SetTextSelection);
-        
-        if !self.disabled() {
-            node.add_action(accesskit::Action::ReplaceSelectedText);
-        }
-
-        return node;
-    }
 }
 
 impl TextEdit {
@@ -1737,31 +1645,3 @@ pub(crate) fn should_use_animation(delta: &winit::event::MouseScrollDelta, verti
     }
 }
 
-#[cfg(feature = "accessibility")]
-fn push_accesskit_update_textedit_partial_borrows(
-    accesskit_id: Option<accesskit::NodeId>,
-    mut node: accesskit::Node,
-    inner: &mut text_box::TextBox,
-    tree_update: &mut accesskit::TreeUpdate,
-    left: f64,
-    top: f64,
-    node_id_generator: fn() -> accesskit::NodeId,
-) {
-    if let Some(id) = accesskit_id {
-        inner.layout_access.build_nodes(
-            &inner.text,
-            &inner.layout,
-            tree_update,
-            &mut node,
-            node_id_generator,
-            left,
-            top,
-        );
-
-        if let Some(ak_sel) = inner.selection.to_access_selection(&inner.layout, &inner.layout_access) {
-            node.set_text_selection(ak_sel);
-        }
-        
-        tree_update.nodes.push((id, node))
-    }
-}
