@@ -1154,6 +1154,32 @@ impl TextEdit {
             self.text_box.text()
         }
     }
+
+    /// Returns the placeholder text, if any.
+    pub fn placeholder(&self) -> Option<&str> {
+        self.placeholder_text.as_deref()
+    }
+
+    #[cfg(feature = "accessibility")]
+    /// Fills `parent_node` with `TextRun` children (for the screen-reader text
+    /// pattern) and sets the caret/selection on it. Mirrors
+    /// [`TextBox::build_accesskit_nodes`], adding the selection that an editable
+    /// field needs.
+    pub fn build_accesskit_nodes(
+        &mut self,
+        parent_node: &mut accesskit::Node,
+        out: &mut Vec<(accesskit::NodeId, accesskit::Node)>,
+        next_node_id: impl FnMut() -> accesskit::NodeId,
+    ) {
+        self.text_box.build_accesskit_nodes(parent_node, out, next_node_id);
+        if let Some(selection) = self
+            .text_box
+            .selection
+            .to_access_selection(&self.text_box.layout, &self.text_box.layout_access)
+        {
+            parent_node.set_text_selection(selection);
+        }
+    }
     
     /// Returns the currently selected text, if any. Returns `None` if placeholder is showing.
     pub fn selected_text(&self) -> Option<&str> {
@@ -1247,6 +1273,11 @@ impl TextEdit {
     /// Sets the depth (z-order) of the text edit box.
     pub fn set_depth(&mut self, value: f32) {
         self.text_box.set_depth(value);
+    }
+
+    /// Sets the opacity multiplier of the text edit box, multiplied into every glyph's alpha.
+    pub fn set_opacity(&mut self, value: f32) {
+        self.text_box.set_opacity(value);
     }
 
     /// Sets the screen-space clipping rectangle for the text edit box.

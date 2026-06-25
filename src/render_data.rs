@@ -132,7 +132,7 @@ pub struct BoxGpu {
     pub slab_metadata: u32,               // 4 bytes
     pub depth: f32,                       // 4 bytes - z-order for rendering
     pub group_transform_index: u32,       // 4 bytes - index into group_transforms buffer
-    pub _padding: u32,                    // 4 bytes - padding for alignment
+    pub opacity: f32,                     // 4 bytes - per-box opacity multiplier (1.0 = opaque)
 }
 
 impl GpuSlabItem for BoxGpu {
@@ -189,7 +189,7 @@ fn pack_flags_and_page(flags: u32, page_index: u32) -> u32 {
     (flags & 0xFFFFFF) | ((page_index & 0xFF) << 24)
 }
 
-fn create_box_data(clip_rect: Option<BoundingBox>, scroll_offset: (f32, f32), transform: Transform2D, screen_clip: Option<BoundingBox>, depth: f32, group_transform_index: u32) -> BoxGpu {
+fn create_box_data(clip_rect: Option<BoundingBox>, scroll_offset: (f32, f32), transform: Transform2D, screen_clip: Option<BoundingBox>, depth: f32, group_transform_index: u32, opacity: f32) -> BoxGpu {
     // clip_rect from effective_clip_rect() is already in layout-local coordinates (includes scroll_offset)
     let (clip_rect_x, clip_rect_y) = if let Some(clip) = clip_rect {
         (
@@ -220,7 +220,7 @@ fn create_box_data(clip_rect: Option<BoundingBox>, scroll_offset: (f32, f32), tr
         slab_metadata: 0,
         depth,
         group_transform_index,
-        _padding: 0,
+        opacity,
     }
 }
 
@@ -555,7 +555,8 @@ impl RenderData {
             text_box.transform(),
             screen_clip,
             text_box.depth,
-            group_transform_index
+            group_transform_index,
+            text_box.opacity,
         );
 
         if ! text_box.needs_quad_rebuild && text_box.render_data_info.glyph_quad_handle.is_some() {

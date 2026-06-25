@@ -329,8 +329,6 @@ impl TextBoxHandle {
     pub fn to_cloned(&self) -> ClonedTextBoxHandle {
         ClonedTextBoxHandle { key: self.key }
     }
-    /// The slab key identifying this text box.
-    pub fn key(&self) -> usize { self.key }
 }
 
 impl TextEditHandle {
@@ -338,8 +336,6 @@ impl TextEditHandle {
     pub fn to_cloned(&self) -> ClonedTextEditHandle {
         ClonedTextEditHandle { key: self.key }
     }
-    /// The slab key identifying this text edit.
-    pub fn key(&self) -> usize { self.key }
 }
 
 
@@ -753,7 +749,6 @@ impl Text {
     pub fn get_text_edit_mut(&mut self, handle: &TextEditHandle) -> &mut TextEdit {
         return &mut self.text_edits[handle.key];
     }
-
 
     /// Get a reference to a text edit.
     /// 
@@ -1836,11 +1831,6 @@ impl Text {
     /// This is a fast lookup operation that does not require any hashing.
     pub fn get_text_box_mut(&mut self, handle: &TextBoxHandle) -> &mut TextBox {
         return &mut self.text_boxes[handle.key];
-    }
-
-    /// Get a mutable reference to a text box by its raw slab key (see [`TextBoxHandle::key`]).
-    pub fn get_text_box_mut_by_key(&mut self, key: usize) -> &mut TextBox {
-        return &mut self.text_boxes[key];
     }
 
 

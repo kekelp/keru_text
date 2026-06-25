@@ -16,7 +16,7 @@ struct BoxGpu {
     uint slab_metadata;
     float depth;
     uint group_transform_index;
-    uint _padding;
+    float opacity;
 }
 
 struct GlyphQuad {
@@ -179,6 +179,7 @@ float4 text_fragment_pure(GlyphQuad quad, float2 uv, float4 frag_coord): SV_Targ
     }
 
     float4 color = unpack_color_u32(quad.color);
+    color.a *= box.opacity;
     uint page_index = unpack_page_index(quad.flags_and_page);
     uint content_type = get_content_type(quad.flags_and_page);
 

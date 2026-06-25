@@ -48,6 +48,7 @@ pub struct TextBox {
     pub(crate) group_transform_index: Option<GroupTransformHandle>,
     pub(crate) max_advance: f32,
     pub(crate) depth: f32,
+    pub(crate) opacity: f32,
     pub(crate) selection: Selection,
     pub(crate) width: f32,
     pub(crate) height: f32,
@@ -170,6 +171,7 @@ impl TextBox {
             max_advance: size.0,
             height: size.1,
             depth,
+            opacity: 1.0,
             selection: Selection::default(),
             style: StyleHandle { key: default_style_key },
             width: size.0,
@@ -433,11 +435,10 @@ impl TextBox {
         &mut self,
         parent_node: &mut Node,
         out: &mut Vec<(NodeId, Node)>,
-        x: f64,
-        y: f64,
         mut next_node_id: impl FnMut() -> NodeId,
     ) {
         self.refresh_layout(None, false);
+        let (x, y) = self.position();
         let mut dummy = accesskit::TreeUpdate {
             nodes: Vec::new(),
             tree: None,
@@ -450,8 +451,8 @@ impl TextBox {
             &mut dummy,
             parent_node,
             &mut next_node_id,
-            x,
-            y,
+            x as f64,
+            y as f64,
             |_, _| {},
         );
         out.extend(dummy.nodes);
@@ -910,6 +911,19 @@ impl TextBox {
         let i = self.render_data_info.box_index;
         self.shared_mut().render_data.box_data.get_mut(i).depth = depth;
         self.rebuild_hit_test_data();
+    }
+
+    /// Sets the opacity multiplier of the text box, multiplied into every glyph's alpha.
+    ///
+    /// 1.0 = fully opaque. This function will only update the opacity if the new value is
+    /// different from the current one. Opacity does not affect hit testing.
+    pub fn set_opacity(&mut self, opacity: f32) {
+        if self.opacity == opacity {
+            return;
+        }
+        self.opacity = opacity;
+        let i = self.render_data_info.box_index;
+        self.shared_mut().render_data.box_data.get_mut(i).opacity = opacity;
     }
 
     /// Sets a screen-space clip rect.
