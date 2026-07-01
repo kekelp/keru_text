@@ -7,18 +7,16 @@
 //! 
 //! ```no_run
 //! # use keru_text::*;
-//! // Create the Text struct and the Text renderer:
-//! let mut text = Text::new();
 //! # let device: wgpu::Device = unimplemented!();
 //! # let queue: wgpu::Queue = unimplemented!();
 //! # let surface_config: wgpu::SurfaceConfiguration = unimplemented!();
-//! let text_renderer = TextRenderer::new(&device, &queue, surface_config.format);
-//! // Text manages collections of text boxes and styles.
-//! // TextRenderer holds the state needed to render the text on the gpu.
-//! 
+//! // Create the Text struct. It manages collections of text boxes and styles,
+//! // and holds the state needed to render the text on the gpu.
+//! let mut text = Text::new(&device, &queue, surface_config.format);
+//!
 //! // Add text boxes and get handles:
-//! let handle = text.add_text_box("Hello", (10.0, 10.0), (200.0, 50.0), 0.0);
-//! let edit_handle = text.add_text_edit("Type here".to_string(), (10.0, 70.0), (200.0, 30.0), 0.0);
+//! let handle = text.add_text_box("Hello", Some((10.0, 10.0)), (200.0, 50.0), 0.0);
+//! let edit_handle = text.add_text_edit("Type here".to_string(), Some((10.0, 70.0)), (200.0, 30.0), 0.0);
 //! 
 //! // Use handles to access and modify the boxes:
 //! text.get_text_edit_mut(&edit_handle).raw_text_mut().push_str("... World");
@@ -32,12 +30,10 @@
 //! text.handle_event(&event, &window);
 //! 
 //! // Do shaping, layout, rasterization, etc. to prepare all the text to be rendered:
-//! text.prepare_all(&mut text_renderer);
-//! // Load the data on the gpu:
-//! text_renderer.load_to_gpu(&device, &queue);
+//! text.prepare_all();
 //! // Render the text as part of a wgpu render pass:
 //! # let render_pass: wgpu::RenderPass<'_> = unimplemented!();
-//! text_renderer.render(&mut render_pass);
+//! text.render(&mut render_pass);
 //! ```
 //! 
 //! See the `minimal.rs` or `full.rs` examples in the repository to see a more complete example, including the `winit` and `wgpu` boilerplate.
@@ -78,30 +74,6 @@
 //!
 //! This library was written for use in Keru, which is a declarative library that diffs node trees, so it uses imperative-mode calls to remove widgets. However, it uses the declarative interface for hiding text boxes that need to be kept hidden in the background.
 //! 
-//! ## Advanced rendering
-//! 
-//! When using [`TextRenderer::render()`], all text boxes are rendered in a single draw call.
-//! 
-//! The `TextRenderer` supports using a depth buffer, so this is a perfectly good solution in many cases. However, it's not enough to get correct results when many semitransparent elements overlap.
-//! 
-//! As far as I know, there's no simple solution to this problem, but there are at least three complicated ones:
-//! 
-//! 1) Use a shader that can render both text glyphs and any other elements (rectangles, shapes, bezier paths, etc.), and render everything in one draw call. Then, the GPU will draw the elements in the order they appear in the buffer with perfect blending, all automatically.
-//! 2) Use "batching": do separate draw calls for the first contiguous range of text glyphs, then switch the pipeline and do another draw call for a range of other elements, etc.
-//! 
-//! The `megashader.rs` example shows how this library can be used as part of a render pipeline implementing the first strategy.
-//! 
-//! I tried my hardest to do this in an "extensible" way while keeping all text-related code as a separate module, but the results were limited due to the heavy limitations of the `wgsl` shading language. I will give it another try if I can ever get `slang` shaders to work.
-//! 
-//!
-//! "Regular" batching is currently not implemented.
-//! 
-//! 
-//! 
-//! # Open Issues
-//! 
-//! There is an open issue in the design of the library: the math for scrolling and smooth scrolling animations in overflowing text edit boxes is hardcoded in the library. This means that a GUI library using `keru_text` might have inconsistent scrolling behavior between the `keru_text` text edit boxes and the GUI library's generic scrollable containers.
-
 
 mod setup;
 pub use setup::*;
@@ -137,7 +109,7 @@ pub use parley::TextStyle as ParleyTextStyle;
 
 /// A shareable text style.
 /// 
-/// To use it, first add a `TextStyle2` into a [`Text`] with [`Text::add_style()`], and get a [`StyleHandle`] back. Then, use [`TextBoxMut::set_style()`] to make a text box use the style.
+/// To use it, first add a `TextStyle2` into a [`Text`] with [`Text::add_style()`], and get a [`StyleHandle`] back. Then, use [`TextBox::set_style()`] to make a text box use the style.
 pub type TextStyle2 = ParleyTextStyle<'static, 'static, ColorBrush>;
 
 /// Style configuration for text edit boxes.

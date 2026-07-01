@@ -2,7 +2,7 @@ use crate::*;
 
 /// Statistics about work done during a render cycle.
 ///
-/// Call [`Text::render_stats()`] after [`Text::prepare_all()`] and [`load_to_gpu()`] to see
+/// Call [`Text::render_stats()`] after [`Text::prepare_all()`] and [`Text::load_to_gpu()`] to see
 /// what work was done and whether the optimizations are working.
 ///
 /// Only available in debug builds.

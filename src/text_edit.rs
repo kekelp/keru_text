@@ -1389,7 +1389,7 @@ impl TextEdit {
 
     /// Adds a [`StyleProperty`] override for the given byte range of the text.
     ///
-    /// See [`TextBox::push_style_property`] for details.
+    /// See [`TextBox::push_ranged_style_property`] for details.
     pub fn push_style_property(&mut self, prop: StyleProperty<'static, ColorBrush>, range: std::ops::Range<usize>) {
         self.text_box.push_ranged_style_property(prop, range);
     }
@@ -1410,7 +1410,7 @@ impl TextEdit {
 
     /// Clears all per-range style property overrides.
     ///
-    /// See [`TextBox::clear_style_properties`] for details.
+    /// See [`TextBox::clear_ranged_style_properties`] for details.
     pub fn clear_style_properties(&mut self) {
         self.text_box.clear_ranged_style_properties();
     }
