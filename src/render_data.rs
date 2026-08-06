@@ -2,7 +2,7 @@ use crate::*;
 
 /// Statistics about work done during a render cycle.
 ///
-/// Call [`Text::render_stats()`] after [`Text::prepare_all()`] and [`load_to_gpu()`] to see
+/// Call [`Text::render_stats()`] after [`Text::prepare_all()`] and [`Text::load_to_gpu()`] to see
 /// what work was done and whether the optimizations are working.
 ///
 /// Only available in debug builds.
@@ -133,6 +133,8 @@ pub struct BoxGpu {
     pub depth: f32,                       // 4 bytes - z-order for rendering
     pub group_transform_index: u32,       // 4 bytes - index into group_transforms buffer
     pub opacity: f32,                     // 4 bytes - per-box opacity multiplier (1.0 = opaque)
+    pub color_override: u32,              // 4 bytes. 0x000000 is "no override"
+    pub _padding: u32,                    // 4 bytes
 }
 
 impl GpuSlabItem for BoxGpu {
@@ -189,7 +191,15 @@ fn pack_flags_and_page(flags: u32, page_index: u32) -> u32 {
     (flags & 0xFFFFFF) | ((page_index & 0xFF) << 24)
 }
 
-fn create_box_data(clip_rect: Option<BoundingBox>, scroll_offset: (f32, f32), transform: Transform2D, screen_clip: Option<BoundingBox>, depth: f32, group_transform_index: u32, opacity: f32) -> BoxGpu {
+/// Pack a color into the `0xRRGGBBAA` the shader unpacks.
+pub(crate) fn pack_color_brush(color: ColorBrush) -> u32 {
+    ((color.0[0] as u32) << 24)
+    | ((color.0[1] as u32) << 16)
+    | ((color.0[2] as u32) << 8)
+    | (color.0[3] as u32)
+}
+
+fn create_box_data(clip_rect: Option<BoundingBox>, scroll_offset: (f32, f32), transform: Transform2D, screen_clip: Option<BoundingBox>, depth: f32, group_transform_index: u32, opacity: f32, color_override: Option<ColorBrush>) -> BoxGpu {
     // clip_rect from effective_clip_rect() is already in layout-local coordinates (includes scroll_offset)
     let (clip_rect_x, clip_rect_y) = if let Some(clip) = clip_rect {
         (
@@ -221,6 +231,9 @@ fn create_box_data(clip_rect: Option<BoundingBox>, scroll_offset: (f32, f32), tr
         depth,
         group_transform_index,
         opacity,
+        // 0 is "no override": a fully transparent text color would be meaningless anyway.
+        color_override: color_override.map(pack_color_brush).unwrap_or(0),
+        _padding: 0,
     }
 }
 
@@ -502,10 +515,10 @@ impl RenderData {
         if had_relayout { self.stats.relayouts += 1; }
         if had_relayout { text_edit.text_box.needs_quad_rebuild = true; }
 
-        self.prepare_text_box_layout(&mut text_edit.text_box, scratch, 20, encoder, text_edit.single_line);
+        self.prepare_text_box_layout(&mut text_edit.text_box, scratch, 20, encoder);
     }
 
-    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, scratch: &mut Vec<GlyphQuad>, spare_capacity: u32, encoder: &mut wgpu::CommandEncoder, single_line: bool) {
+    pub(crate) fn prepare_text_box_layout(&mut self, text_box: &mut TextBox, scratch: &mut Vec<GlyphQuad>, spare_capacity: u32, encoder: &mut wgpu::CommandEncoder) {
         let w = self.params.screen_resolution_width;
         let h = self.params.screen_resolution_height;
         let t = text_box.transform.translation;
@@ -529,7 +542,7 @@ impl RenderData {
         
         let _needs_relayout = text_box.needs_relayout();
 
-        text_box.refresh_layout(None, single_line);
+        text_box.refresh_layout();
         
         #[cfg(debug_assertions)] {
             if _needs_relayout {
@@ -557,6 +570,7 @@ impl RenderData {
             text_box.depth,
             group_transform_index,
             text_box.opacity,
+            text_box.color_override,
         );
 
         if ! text_box.needs_quad_rebuild && text_box.render_data_info.glyph_quad_handle.is_some() {

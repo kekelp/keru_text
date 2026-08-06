@@ -16,6 +16,8 @@ use std::hash::{Hash, Hasher};
 use ahash::AHasher;
 
 pub(crate) const X_TOLERANCE: f64 = 35.0;
+/// How far a size has to move before it's worth acting on.
+pub(crate) const SIZE_TOLERANCE: f32 = 0.5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextIdentity {
@@ -46,9 +48,9 @@ pub struct TextBox {
     pub(crate) transform: Transform2D,
     // should get rid of it and have it only in the BoxData
     pub(crate) group_transform_index: Option<GroupTransformHandle>,
-    pub(crate) max_advance: f32,
     pub(crate) depth: f32,
     pub(crate) opacity: f32,
+    pub(crate) color_override: Option<ColorBrush>,
     pub(crate) selection: Selection,
     pub(crate) width: f32,
     pub(crate) height: f32,
@@ -58,11 +60,20 @@ pub struct TextBox {
     pub(crate) scroll_offset: (f32, f32),
     
     pub(crate) selectable: bool,
+
+    /// A single-line box lays its text out with no wrapping width at all, so it never wraps and
+    /// scrolls horizontally instead. Set by [`TextEdit::set_single_line()`].
+    pub(crate) single_line: bool,
     
     pub(crate) hidden: bool,
     
-    pub(crate) needs_relayout: bool,
+    pub(crate) needs_reshape: bool,
+    pub(crate) needs_line_break: bool,
     pub(crate) needs_quad_rebuild: bool,
+
+    /// Cached result of [`TextBox::content_widths()`]. Only ever filled in if someone asks for
+    /// it, and dropped whenever the layout is rebuilt.
+    pub(crate) content_widths: Option<ContentWidths>,
 
     pub(crate) can_hide: bool,
     
@@ -165,13 +176,15 @@ impl TextBox {
             #[cfg(feature = "accessibility")]
             layout_access: LayoutAccessibility::default(),
             selectable: true,
-            needs_relayout: true,
+            single_line: false,
+            needs_reshape: true,
+            needs_line_break: false,
             transform: position,
             group_transform_index: None,
-            max_advance: size.0,
             height: size.1,
             depth,
             opacity: 1.0,
+            color_override: None,
             selection: Selection::default(),
             style: StyleHandle { key: default_style_key },
             width: size.0,
@@ -181,6 +194,7 @@ impl TextBox {
             scroll_offset: (0.0, 0.0),
             hidden: false,
             needs_quad_rebuild: true,
+            content_widths: None,
             can_hide: false,
             window_id: None,
             render_data_info: RenderDataInfo {
@@ -218,7 +232,7 @@ impl TextBox {
 
         // Default behavior
         let hit = offset.0 > -X_TOLERANCE
-            && offset.0 < self.max_advance as f64 + X_TOLERANCE
+            && offset.0 < self.width as f64 + X_TOLERANCE
             && offset.1 > 0.0
             && offset.1 < self.height as f64;
 
@@ -420,7 +434,7 @@ impl TextBox {
             Some(parley::BoundingBox {
                 x0: self.scroll_offset.0 as f64,
                 y0: self.scroll_offset.1 as f64,
-                x1: (self.scroll_offset.0 + self.max_advance) as f64,
+                x1: (self.scroll_offset.0 + self.width) as f64,
                 y1: (self.scroll_offset.1 + self.height) as f64,
             })
         } else {
@@ -437,7 +451,7 @@ impl TextBox {
         out: &mut Vec<(NodeId, Node)>,
         mut next_node_id: impl FnMut() -> NodeId,
     ) {
-        self.refresh_layout(None, false);
+        self.refresh_layout();
         let (x, y) = self.position();
         let mut dummy = accesskit::TreeUpdate {
             nodes: Vec::new(),
@@ -481,7 +495,7 @@ impl TextBox {
                         let old_scroll = self.scroll_offset.1;
                         let new_scroll = old_scroll - scroll_amount;
 
-                        self.refresh_layout(None, false);
+                        self.refresh_layout();
                         let total_text_height = self.layout.height();
                         let text_height = self.height;
                         let max_scroll = (total_text_height - text_height).max(0.0).round();
@@ -545,10 +559,10 @@ impl TextBox {
                             if new_scroll_x != scroll_offset_x {
                                 did_scroll = true;
                             }
-                        } else if cursor_pos.0 > (left + self.max_advance) - scroll_margin {
+                        } else if cursor_pos.0 > (left + self.width) - scroll_margin {
                             // Near right border - scroll right
                             let total_text_width = self.layout.full_width();
-                            let max_scroll_x = (total_text_width - self.max_advance).max(0.0);
+                            let max_scroll_x = (total_text_width - self.width).max(0.0);
                             new_scroll_x = (scroll_offset_x + scroll_speed).min(max_scroll_x);
                             if new_scroll_x != scroll_offset_x {
                                 did_scroll = true;
@@ -686,7 +700,7 @@ impl TextBox {
     /// 
     /// After this method is called, the [`TextBox`] will assume that its text has changed. If you have to call this method many times with the same text every time, as when building a declarative or immediate mode interface, consider using a method like [`Self::set_text_hashed()`].
     pub fn text_mut(&mut self) -> &mut Cow<'static, str> {
-        self.needs_relayout = true;
+        self.needs_reshape = true;
         self.text_identity = None;
         &mut self.text
     }
@@ -704,7 +718,7 @@ impl TextBox {
     ///  
     /// After this method is called, the [`TextBox`] will assume that its text has changed. If you have to call this method many times with the same text every time, as when building a declarative or immediate mode interface, consider using a method like [`Self::set_text_hashed()`].
     pub fn set_text(&mut self, new_text: &str) {
-        self.needs_relayout = true;
+        self.needs_reshape = true;
         self.text_identity = None;
         self.ranged_style_properties.clear();
 
@@ -730,7 +744,7 @@ impl TextBox {
             return;
         }
         self.text_identity = Some(new_identity);
-        self.needs_relayout = true;
+        self.needs_reshape = true;
         self.ranged_style_properties.clear();
 
         match &mut self.text {
@@ -757,7 +771,7 @@ impl TextBox {
             return;
         }
         self.text_identity = Some(new_identity);
-        self.needs_relayout = true;
+        self.needs_reshape = true;
         self.ranged_style_properties.clear();
 
         match &mut self.text {
@@ -773,7 +787,7 @@ impl TextBox {
 
     /// Sets the text to a static string reference.
     pub fn set_static_text(&mut self, text: &'static str) {
-        self.needs_relayout = true;
+        self.needs_reshape = true;
         self.text_identity = None;
         self.ranged_style_properties.clear();
         self.text = Cow::Borrowed(text);
@@ -790,7 +804,7 @@ impl TextBox {
             return;
         }
         self.text_identity = Some(new_identity);
-        self.needs_relayout = true;
+        self.needs_reshape = true;
         self.ranged_style_properties.clear();
         self.text = Cow::Borrowed(text);
     }
@@ -987,12 +1001,12 @@ impl TextBox {
         self.scroll_offset = offset;
         let i = self.render_data_info.box_index;
         let auto_clip = self.auto_clip;
-        let max_advance = self.max_advance;
+        let width = self.width;
         let height = self.height;
         let box_data = self.shared_mut().render_data.box_data.get_mut(i);
         box_data.scroll_offset = [offset.0, offset.1];
         if auto_clip {
-            box_data.clip_rect_x = [offset.0, offset.0 + max_advance];
+            box_data.clip_rect_x = [offset.0, offset.0 + width];
             box_data.clip_rect_y = [offset.1, offset.1 + height];
         }
     }
@@ -1005,7 +1019,7 @@ impl TextBox {
             return;
         }
         self.style = style.sneak_clone();
-        self.needs_relayout = true;
+        self.needs_reshape = true;
     }
 
     pub(crate) fn text_inner(&self) -> &str {
@@ -1023,11 +1037,7 @@ impl TextBox {
         scale_factor
     }
 
-    pub(crate) fn rebuild_layout(
-        &mut self,
-        color_override: Option<ColorBrush>,
-        single_line: bool,
-    ) {
+    pub(crate) fn rebuild_layout(&mut self) {
         let scale_factor = self.get_scale_factor();
         
         let k = self.style.key;
@@ -1050,14 +1060,10 @@ impl TextBox {
             builder.push(prop, range.clone());
         }
 
-        if let Some(color_override) = color_override {
-            let style = StyleProperty::Brush(color_override);
-            builder.push(style, 0..usize::MAX);
-        }
-
         let mut layout = builder.build(&self.text);
 
-        let max_advance = if single_line { None } else { Some(self.max_advance) };
+        // A single-line box has no wrapping width at all, so it never wraps.
+        let max_advance = if self.single_line { None } else { Some(self.width) };
 
         layout.break_all_lines(max_advance);
         
@@ -1068,24 +1074,69 @@ impl TextBox {
         );
 
         self.layout = layout;
-        self.needs_relayout = false;
-        
+        self.needs_reshape = false;
+        self.needs_line_break = false;
+        // The shaping changed, so the cached content widths are stale. A re-break alone can't
+        // invalidate them: they're measured from the clusters, independently of any line breaks.
+        self.content_widths = None;
+
         // todo: does this do anything?
+        self.selection = self.selection.refresh(&self.layout);
+    }
+
+    /// Re-break the existing shaped text into lines, without rebuilding it.
+    ///
+    /// This is the cheap half of [`Self::rebuild_layout()`]: parley keeps the shaped runs and
+    /// clusters in the layout and only recomputes the lines, so nothing touches the font stack.
+    pub(crate) fn rebreak_lines(&mut self) {
+        // A single-line box has no wrapping width at all, so it never wraps.
+        let max_advance = if self.single_line { None } else { Some(self.width) };
+
+        self.layout.break_all_lines(max_advance);
+
+        self.layout.align(
+            max_advance,
+            self.alignment,
+            AlignmentOptions::default(),
+        );
+
+        self.needs_line_break = false;
+
         self.selection = self.selection.refresh(&self.layout);
     }
 
 
     /// Sets the size of the text box.
     pub fn set_size(&mut self, size: (f32, f32)) {
-        let tolerance = 0.5;
-        let relayout = (self.width - size.0).abs() > tolerance || (self.height - size.1).abs() > tolerance || (self.max_advance - size.0).abs() > tolerance;
-        self.width = size.0;
-        self.height = size.1;
-        self.max_advance = size.0;
-        if relayout {
-            self.needs_relayout = true;
-            self.rebuild_hit_test_data();
+        self.set_width(size.0);
+        self.set_height(size.1);
+    }
+
+    /// Sets the width of the text box, which is also the width its lines wrap at.
+    ///
+    /// This is the only thing that can change the line breaking, so it's the one to call from a
+    /// layout pass, which has to know how tall the text ends up before it can know where the box
+    /// goes. The height can then be set separately, once it's known.
+    pub fn set_width(&mut self, width: f32) {
+        if (self.width - width).abs() <= SIZE_TOLERANCE {
+            return;
         }
+        self.width = width;
+        // A different width doesn't change the shaping, only where the lines break.
+        self.needs_line_break = true;
+        self.rebuild_hit_test_data();
+    }
+
+    /// Sets the height of the text box.
+    ///
+    /// The height doesn't affect the text layout at all: nothing about shaping or line breaking
+    /// depends on it. It's only used for clipping, hit testing and scrolling.
+    pub fn set_height(&mut self, height: f32) {
+        if (self.height - height).abs() <= SIZE_TOLERANCE {
+            return;
+        }
+        self.height = height;
+        self.rebuild_hit_test_data();
     }
 
     /// Returns the size of the text box.
@@ -1103,7 +1154,7 @@ impl TextBox {
             return;
         }
         self.alignment = alignment;
-        self.needs_relayout = true;
+        self.needs_line_break = true;
     }
 
     /// Sets the text alignment.
@@ -1121,7 +1172,7 @@ impl TextBox {
     /// calling this to see the effect.
     pub fn push_ranged_style_property(&mut self, prop: StyleProperty<'static, ColorBrush>, range: std::ops::Range<usize>) {
         self.ranged_style_properties.push((prop, range));
-        self.needs_relayout = true;
+        self.needs_reshape = true;
     }
 
     /// Sets the whole-box [`StyleProperty`] overrides, replacing any previously set overrides.
@@ -1132,13 +1183,13 @@ impl TextBox {
             return;
         }
         self.style_property_overrides = properties.to_vec();
-        self.needs_relayout = true;
+        self.needs_reshape = true;
     }
 
     /// Clears all per-range style property overrides.
     pub fn clear_ranged_style_properties(&mut self) {
         self.ranged_style_properties.clear();
-        self.needs_relayout = true;
+        self.needs_reshape = true;
     }
 
     /// Clears all style properties of a range.
@@ -1177,7 +1228,7 @@ impl TextBox {
             }
         });
 
-        self.needs_relayout = true;
+        self.needs_reshape = true;
     }
 
     /// Adjusts ranged style properties after a text edit.
@@ -1222,7 +1273,7 @@ impl TextBox {
             return;
         }
         self.transform.scale = scale;
-        self.needs_relayout = true;
+        self.needs_reshape = true;
     }
 
     // #[cfg(feature = "accesskit")]
@@ -1413,24 +1464,47 @@ impl TextBox {
 
     /// Returns the layout, refreshing it if needed.
     pub fn layout(&mut self) -> &Layout<ColorBrush> {
-        self.refresh_layout(None, false);
+        self.refresh_layout();
         &self.layout
     }
-    
-    // todo better comment.
-    /// Refresh the layout.
-    pub fn refresh_layout(&mut self, color_override: Option<ColorBrush>, single_line: bool) {
-        if self.needs_relayout() {
-            self.rebuild_layout(color_override, single_line);
+
+    /// Rebuild the layout if needed.
+    pub fn refresh_layout(&mut self) {
+        if self.needs_reshape {
+            self.rebuild_layout();
+            self.needs_quad_rebuild = true;
+        } else if self.needs_line_break {
+            self.rebreak_lines();
             self.needs_quad_rebuild = true;
         }
+    }
+
+    /// Set a color override for the whole text box.
+    pub fn set_color_override(&mut self, color_override: Option<ColorBrush>) {
+        if self.color_override != color_override {
+            self.color_override = color_override;
+            // The box data is rewritten every frame, so this only has to make sure that a frame
+            // happens at all.
+            self.shared_mut().decorations_dirty = true;
+        }
+    }
+
+    /// The width the text wants, independently of the box's current size.
+    pub fn content_widths(&mut self) -> ContentWidths {
+        self.refresh_layout();
+        if let Some(cached) = self.content_widths {
+            return cached;
+        }
+        let content_widths = self.layout.calculate_content_widths();
+        self.content_widths = Some(content_widths);
+        content_widths
     }
 
     /// Returns `true` if the text box layout will have to be recomputed because of changes to the text content, size, alignment, font size, etc.
     ///
     /// The layout will automatically be recomputed when preparing the text for render, or when calling [TextBox::layout()].
     pub fn needs_relayout(&mut self) -> bool {
-        return self.needs_relayout;
+        return self.needs_reshape || self.needs_line_break;
     }
 
     /// Sets whether the text is selectable.

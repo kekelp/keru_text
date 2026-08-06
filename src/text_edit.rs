@@ -18,7 +18,8 @@ macro_rules! clear_placeholder_partial_borrows {
         if $self.showing_placeholder {
             $self.text_box.text_mut_string().clear();
             $self.showing_placeholder = false;
-            $self.text_box.refresh_layout(None, $self.single_line);
+            $self.text_box.set_color_override(None);
+            $self.text_box.refresh_layout();
             $self.text_box.move_to_text_start();
         }
     };
@@ -109,7 +110,6 @@ pub struct TextEdit {
     pub(crate) start_time: Option<Instant>,
     pub(crate) blink_period: Duration,
     pub(crate) history: TextEditHistory,
-    pub(crate) single_line: bool,
     pub(crate) newline_mode: NewlineMode,
     pub(crate) disabled: bool,
     pub(crate) text_box: TextBox,
@@ -147,7 +147,6 @@ impl TextEdit {
             start_time: Default::default(),
             blink_period: Default::default(),
             history: TextEditHistory::new(),
-            single_line: false,
             newline_mode: NewlineMode::default(),
             disabled: false,
             text_box,
@@ -184,8 +183,11 @@ impl ScrollAnimation {
 impl TextEdit {
     /// Sets whether the text edit is single-line or multi-line.
     pub fn set_single_line(&mut self, single_line: bool) {
-        if self.single_line != single_line {
-            self.single_line = single_line;
+        if self.text_box.single_line != single_line {
+            self.text_box.single_line = single_line;
+            // This only decides whether there's a wrapping width at all, so the shaped text is
+            // still good and only the lines have to be redone.
+            self.text_box.needs_line_break = true;
             
             // If switching to single line mode, remove any existing newlines and set newline mode to None
             if single_line {
@@ -199,7 +201,7 @@ impl TextEdit {
 
     /// Sets the newline entry mode for multi-line text edits.
     pub fn set_newline_mode(&mut self, mode: NewlineMode) {
-        if !self.single_line {
+        if !self.text_box.single_line {
             self.newline_mode = mode;
         }
     }
@@ -294,7 +296,7 @@ impl TextEdit {
                     }
                     Key::Named(NamedKey::ArrowUp) => {
                         if !shift && ! self.showing_placeholder {
-                            if self.single_line {
+                            if self.text_box.single_line {
                                 self.text_box.move_to_text_start();
                             } else {
                                 self.text_box.move_up();
@@ -303,7 +305,7 @@ impl TextEdit {
                     }
                     Key::Named(NamedKey::ArrowDown) => {
                         if !shift && ! self.showing_placeholder {
-                            if self.single_line {
+                            if self.text_box.single_line {
                                 self.text_box.move_to_text_end();
                             } else {
                                 self.text_box.move_down();
@@ -354,7 +356,7 @@ impl TextEdit {
                             NewlineMode::None => false,
                         };
                         
-                        if newline_mode_matches && ! self.single_line {
+                        if newline_mode_matches && ! self.text_box.single_line {
                             self.insert_or_replace_selection("\n");
                         }
                     }
@@ -465,7 +467,7 @@ impl TextEdit {
         self.text_box.text_mut_string().replace_range(range, s);
         self.text_changed = true;
 
-        if self.single_line {
+        if self.text_box.single_line {
             self.remove_newlines();
         }
     }
@@ -657,7 +659,7 @@ impl TextEdit {
                 self.text_box.text_mut_string()
                     .insert_str(selection_start, text);
 
-                if self.single_line {
+                if self.text_box.single_line {
                     self.remove_newlines();
                 }
             } else {
@@ -683,7 +685,7 @@ impl TextEdit {
             Cursor::from_byte_index(&self.text_box.layout, start + cursor.1, Affinity::Downstream),
         ));
 
-        self.text_box.needs_relayout = true;
+        self.text_box.needs_reshape = true;
     }
 
     /// Stop IME composing.
@@ -757,7 +759,7 @@ impl TextEdit {
             let prev_selection = op.prev_selection;
             self.text_box.set_selection(prev_selection);
 
-            if self.single_line {
+            if self.text_box.single_line {
                 self.remove_newlines();
             }
             self.text_changed = true;
@@ -791,7 +793,7 @@ impl TextEdit {
             self.refresh_layout();
             self.text_box.selection = Cursor::from_byte_index(&self.text_box.layout, end, Affinity::Upstream).into();
 
-            if self.single_line {
+            if self.text_box.single_line {
                 self.remove_newlines();
             }
             self.text_changed = true;
@@ -807,14 +809,14 @@ impl TextEdit {
             self.text_box.adjust_ranged_styles_for_edit(start, start, s.len());
             self.text_box.text_mut_string().insert_str(start, s);
 
-            if self.single_line {
+            if self.text_box.single_line {
                 self.remove_newlines();
             }
         } else {
             self.text_box.adjust_ranged_styles_for_edit(range.start, range.end, s.len());
             self.text_box.text_mut_string().replace_range(range, s);
 
-            if self.single_line {
+            if self.text_box.single_line {
                 self.remove_newlines();
             }
         }
@@ -839,6 +841,16 @@ impl TextEdit {
     /// Sets the size of the text edit box.
     pub fn set_size(&mut self, size: (f32, f32)) {
         self.text_box.set_size(size)
+    }
+
+    /// Sets the width of the text edit box, which is also the width its lines wrap at.
+    pub fn set_width(&mut self, width: f32) {
+        self.text_box.set_width(width)
+    }
+
+    /// Sets the height of the text edit box, which doesn't affect the text layout.
+    pub fn set_height(&mut self, height: f32) {
+        self.text_box.set_height(height)
     }
 
     /// Returns the size of the text edit box.
@@ -1108,7 +1120,7 @@ impl TextEdit {
 
     /// Returns `true` if the text edit is in single-line mode.
     pub fn single_line(&self) -> bool {
-        self.single_line
+        self.text_box.single_line
     }
 
     /// Returns the newline entry mode.
@@ -1308,7 +1320,7 @@ impl TextEdit {
     fn apply_horizontal_scroll(&mut self, new_scroll: f32) -> bool {
         let old_scroll = self.text_box.scroll_offset.0;
         let total_text_width = self.text_box.layout.full_width();
-        let text_width = self.text_box.max_advance;
+        let text_width = self.text_box.width;
         let max_scroll = (total_text_width - text_width).max(0.0).round() + CURSOR_WIDTH;
         let clamped_scroll = new_scroll.clamp(0.0, max_scroll).round();
         
@@ -1323,9 +1335,9 @@ impl TextEdit {
     /// Updates scroll offset to ensure cursor is visible.
     pub fn update_scroll_to_cursor(&mut self) -> bool {
         if let Some(cursor_rect) = self.cursor_geometry(1.0) {
-            if self.single_line {
+            if self.text_box.single_line {
                 // Horizontal scrolling for single-line edits
-                let text_width = self.text_box.max_advance;
+                let text_width = self.text_box.width;
                 let cursor_left = cursor_rect.x0 as f32;
                 let cursor_right = cursor_rect.x1 as f32;
                 let current_scroll = self.text_box.scroll_offset().0;
@@ -1389,7 +1401,7 @@ impl TextEdit {
 
     /// Adds a [`StyleProperty`] override for the given byte range of the text.
     ///
-    /// See [`TextBox::push_style_property`] for details.
+    /// See [`TextBox::push_ranged_style_property`] for details.
     pub fn push_style_property(&mut self, prop: StyleProperty<'static, ColorBrush>, range: std::ops::Range<usize>) {
         self.text_box.push_ranged_style_property(prop, range);
     }
@@ -1410,7 +1422,7 @@ impl TextEdit {
 
     /// Clears all per-range style property overrides.
     ///
-    /// See [`TextBox::clear_style_properties`] for details.
+    /// See [`TextBox::clear_ranged_style_properties`] for details.
     pub fn clear_style_properties(&mut self) {
         self.text_box.clear_ranged_style_properties();
     }
@@ -1440,7 +1452,8 @@ impl TextEdit {
             None
         };
 
-        self.text_box.refresh_layout(color_override, self.single_line);
+        self.text_box.set_color_override(color_override);
+        self.text_box.refresh_layout();
     }
 
     /// Set the text of the text edit box.
@@ -1617,7 +1630,7 @@ impl TextEdit {
     fn remove_newlines(&mut self) {
         let removed = remove_newlines_inplace(self.text_box.text_mut_string());
         if removed {
-            self.text_box.needs_relayout = true;
+            self.text_box.needs_reshape = true;
         }
     }
 

@@ -17,6 +17,8 @@ struct BoxGpu {
     float depth;
     uint group_transform_index;
     float opacity;
+    uint color_override;
+    uint _padding;
 }
 
 struct GlyphQuad {
@@ -178,10 +180,15 @@ float4 text_fragment_pure(GlyphQuad quad, float2 uv, float4 frag_coord): SV_Targ
         discard;
     }
 
-    float4 color = unpack_color_u32(quad.color);
-    color.a *= box.opacity;
     uint page_index = unpack_page_index(quad.flags_and_page);
     uint content_type = get_content_type(quad.flags_and_page);
+
+    float4 color = unpack_color_u32(quad.color);
+
+    if (box.color_override != 0u && content_type == 0u) {
+        color = unpack_color_u32(box.color_override);
+    }
+    color.a *= box.opacity;
 
     if (content_type == 1) {
         // Color bitmap text

@@ -977,7 +977,7 @@ impl Text {
 
         for (_, text_edit) in self.text_edits.iter_mut() {
             if styles_changed && self.shared.changed_style_keys.contains(&text_edit.text_box.style.key) {
-                text_edit.text_box.needs_relayout = true;
+                text_edit.text_box.needs_reshape = true;
             }
             if ! text_edit.text_box.hidden() {
                 self.shared.render_data.prepare_text_edit_layout(text_edit, &mut self.shared.scratch_quads, &mut encoder);
@@ -986,11 +986,10 @@ impl Text {
 
         for (_, mut text_box) in self.text_boxes.iter_mut() {
             if styles_changed && self.shared.changed_style_keys.contains(&text_box.style.key) {
-                text_box.needs_relayout = true;
+                text_box.needs_reshape = true;
             }
             if ! text_box.hidden() {
-                let single_line = false;
-                self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads, 4, &mut encoder, single_line);
+                self.shared.render_data.prepare_text_box_layout(&mut text_box, &mut self.shared.scratch_quads, 4, &mut encoder);
             }
         }
 
@@ -1346,6 +1345,7 @@ impl Text {
                     match focused {
                         AnyBox::TextBox(i) => {
                             if self.handle_keyboard_selection(i, event, action_mod) {
+                                self.shared.decorations_dirty = true;
                                 return true;
                             }
                         }
@@ -1728,7 +1728,6 @@ impl Text {
                     self.shared.multi_box_selection.push(next_key);
                 }
             }
-            // else: at absolute chain boundary — event consumed but nothing to do.
             return true;
         }
 
@@ -1752,7 +1751,6 @@ impl Text {
             let new_cursor = prev_toward_focused.unwrap_or(focused_key);
             self.shared.cross_box_cursor_key = if new_cursor == focused_key { None } else { Some(new_cursor) };
 
-            // Apply op to new cursor box — its cursor was at the far boundary, step inward.
             {
                 let tb = &mut self.text_boxes[new_cursor];
                 apply_shift_nav_op(&mut tb.selection, &tb.layout, event, action_mod);
@@ -2012,7 +2010,7 @@ impl Text {
             let shift_held = self.input_state.modifiers.state().shift_key();
             
             if let Some(te) = self.text_edits.get_mut(handle.key) {
-                if te.single_line {
+                if te.text_box.single_line {
                     // Single-line horizontal scrolling
                     let scroll_amount = match delta {
                         winit::event::MouseScrollDelta::LineDelta(x, y) => {
@@ -2036,7 +2034,7 @@ impl Text {
                         let target_scroll = current_scroll - scroll_amount;
                         
                         let total_text_width = te.text_box.layout.full_width();
-                        let text_width = te.text_box.max_advance;
+                        let text_width = te.text_box.width;
                         let max_scroll = (total_text_width - text_width).max(0.0).round() + crate::text_edit::CURSOR_WIDTH;
                         let clamped_target = target_scroll.clamp(0.0, max_scroll).round();
                         
