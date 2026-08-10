@@ -188,6 +188,8 @@ pub(crate) struct Shared {
     pub cross_box_cursor_key: Option<usize>,
 
     pub windows: Vec<WindowInfo>,
+    /// A UI scale factor that multiplies with each window's real scale factor. Useful for higher-resolution screenshots.
+    pub explicit_scale_factor: f64,
     pub layout_cx: LayoutContext<ColorBrush>,
     pub font_cx: FontContext,
 
@@ -529,6 +531,7 @@ impl Text {
             shared: Box::new(Shared {
                 render_data,
                 windows: Vec::with_capacity(1),
+                explicit_scale_factor: 1.0,
                 styles,
                 hit_tests: Slab::with_capacity(10),
                 scrolled: true,
@@ -1829,6 +1832,22 @@ impl Text {
     /// This is a fast lookup operation that does not require any hashing.
     pub fn get_text_box_mut(&mut self, handle: &TextBoxHandle) -> &mut TextBox {
         return &mut self.text_boxes[handle.key];
+    }
+
+    /// Set a scale factor for all text.
+    /// 
+    /// This is an explict scale factor separate from the intrinsic scale factor for high-dpi displays, which is respected automatically. 
+    pub fn set_ui_scale_factor(&mut self, ui_scale_factor: f64) {
+        if self.shared.explicit_scale_factor == ui_scale_factor {
+            return;
+        }
+        self.shared.explicit_scale_factor = ui_scale_factor;
+        for (_, text_box) in self.text_boxes.iter_mut() {
+            text_box.needs_reshape = true;
+        }
+        for (_, text_edit) in self.text_edits.iter_mut() {
+            text_edit.text_box.needs_reshape = true;
+        }
     }
 
 

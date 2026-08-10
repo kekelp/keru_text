@@ -1034,7 +1034,7 @@ impl TextBox {
             self.shared().windows.first().map(|w| w.scale_factor).unwrap_or(1.0)
         };
 
-        scale_factor
+        scale_factor * self.shared().explicit_scale_factor
     }
 
     pub(crate) fn rebuild_layout(&mut self) {
