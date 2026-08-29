@@ -40,7 +40,7 @@ struct State {
 impl State {
     fn new(window: Arc<Window>) -> Self {
         let physical_size = window.inner_size();
-        let instance = Instance::new(&InstanceDescriptor::default());
+        let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
         let adapter =
             pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default()))
                 .unwrap();
@@ -94,7 +94,10 @@ impl State {
                 self.window.request_redraw();
             }
             WindowEvent::RedrawRequested => {
-                let frame = self.surface.get_current_texture().unwrap();
+                let frame = match self.surface.get_current_texture() {
+                    wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                    other => panic!("Failed to get current surface texture: {other:?}"),
+                };
                 let view = frame.texture.create_view(&TextureViewDescriptor::default());
 
                 self.text.prepare_all();
@@ -118,7 +121,7 @@ impl State {
                 }
 
                 self.queue.submit(Some(encoder.finish()));
-                frame.present();
+                self.queue.present(frame);
 
                 std::thread::sleep(Duration::from_millis(16));
                 self.window.request_redraw();

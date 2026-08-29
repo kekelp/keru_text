@@ -57,7 +57,7 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
             vec_len: 0,
             label: label.to_string(),
             usage,
-            staging_belt: StagingBelt::new(16384),
+            staging_belt: StagingBelt::new(device.clone(), 16384),
             dirty: false,
             reallocated: false,
             device: device.clone(),
@@ -67,8 +67,8 @@ impl<T: Copy + Default + Clone> GpuHeap<T> {
 
     fn belt_write_bytes(&mut self, byte_offset: u64, bytes: &[u8], encoder: &mut wgpu::CommandEncoder) {
         let Some(size) = wgpu::BufferSize::new(bytes.len() as u64) else { return };
-        let Self { staging_belt, buffer, device, .. } = self;
-        let mut view = staging_belt.write_buffer(encoder, buffer, byte_offset, size, device);
+        let Self { staging_belt, buffer, .. } = self;
+        let mut view = staging_belt.write_buffer(encoder, buffer, byte_offset, size);
         view.copy_from_slice(bytes);
         self.dirty = true;
     }

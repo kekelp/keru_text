@@ -35,7 +35,7 @@ struct State {
 impl State {
     fn new(window: Arc<Window>) -> Self {
         let physical_size = window.inner_size();
-        let instance = Instance::new(&InstanceDescriptor::default());
+        let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
         let adapter =
             pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default()))
                 .unwrap();
@@ -155,7 +155,10 @@ impl State {
                 self.text.prepare_all();
 
                 // A bunch of wgpu boilerplate to be able to draw on the screen.
-                let surface_texture = self.surface.get_current_texture().unwrap();
+                let surface_texture = match self.surface.get_current_texture() {
+                    wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                    other => panic!("Failed to get current surface texture: {other:?}"),
+                };
                 let view = surface_texture.texture.create_view(&TextureViewDescriptor::default());
                 let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { label: None });
                 {
@@ -178,7 +181,7 @@ impl State {
 
                 // More boilerplate.
                 self.queue.submit(Some(encoder.finish()));
-                surface_texture.present();
+                self.queue.present(surface_texture);
                 self.window.request_redraw();
             }
             WindowEvent::ModifiersChanged(modifiers) => {

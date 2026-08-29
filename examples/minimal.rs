@@ -19,7 +19,7 @@ struct State {
 
 impl State {
     fn new(window: Arc<Window>) -> Self {
-        let instance = Instance::new(&InstanceDescriptor::default());
+        let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default())).unwrap();
         let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).unwrap();
         let surface = instance.create_surface(window.clone()).unwrap();
@@ -62,7 +62,10 @@ impl winit::application::ApplicationHandler for Application {
             WindowEvent::RedrawRequested => {
                 state.text.prepare_all();
 
-                let surface_texture = state.surface.get_current_texture().unwrap();
+                let surface_texture = match state.surface.get_current_texture() {
+                    wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                    other => panic!("Failed to get current surface texture: {other:?}"),
+                };
                 let mut encoder = state.device.create_command_encoder(&CommandEncoderDescriptor::default());
                 {
                     let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -78,7 +81,7 @@ impl winit::application::ApplicationHandler for Application {
                 }
         
                 state.queue.submit(Some(encoder.finish()));
-                surface_texture.present();
+                state.queue.present(surface_texture);
 
                 state.window.request_redraw();
             },

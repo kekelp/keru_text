@@ -125,7 +125,7 @@ impl TextRenderer {
             label: Some("sampler"),
             min_filter: FilterMode::Nearest,
             mag_filter: FilterMode::Nearest,
-            mipmap_filter: FilterMode::Nearest,
+            mipmap_filter: MipmapFilterMode::Nearest,
             lod_min_clamp: 0f32,
             lod_max_clamp: 0f32,
             ..Default::default()
@@ -187,8 +187,8 @@ impl TextRenderer {
 
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
         });
 
         let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
@@ -197,7 +197,7 @@ impl TextRenderer {
             vertex: VertexState {
                 module: &vertex_shader,
                 entry_point: Some("main"),
-                buffers: &[vertex_buffer_layout],
+                buffers: &[Some(vertex_buffer_layout)],
                 compilation_options: PipelineCompilationOptions::default(),
             },
             fragment: Some(FragmentState {
@@ -216,7 +216,7 @@ impl TextRenderer {
             },
             depth_stencil,
             multisample: MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 

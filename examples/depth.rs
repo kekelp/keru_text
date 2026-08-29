@@ -45,7 +45,7 @@ struct TriangleVertex {
 impl State {
     fn new(window: Arc<Window>) -> Self {
         let physical_size = window.inner_size();
-        let instance = Instance::new(&InstanceDescriptor::default());
+        let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default())).unwrap();
         let (device, queue) = pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).unwrap();
         
@@ -73,22 +73,22 @@ impl State {
 
         let triangle_depth_stencil_state = DepthStencilState {
             format: depth_format,
-            depth_write_enabled: true,
-            depth_compare: CompareFunction::Less,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(CompareFunction::Less),
             stencil: StencilState::default(),
             bias: DepthBiasState::default(),
         };
 
         let text_depth_stencil_state = DepthStencilState {
             format: depth_format,
-            depth_write_enabled: false,
-            depth_compare: CompareFunction::Less,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(CompareFunction::Less),
             stencil: StencilState::default(),
             bias: DepthBiasState::default(),
         };
 
         let text_depth = 0.5;
-        let mut text = Text::new(&device, &queue, surface_config.format);
+        let mut text = Text::new_with_params(&device, &queue, surface_config.format, Some(text_depth_stencil_state), TextRendererParams::default());
         let _text_handle = text.add_text_box(
             "Text rendering supports basic depth testing, but this isn't enough to draw multiple semitransparent objects both behind and in front of text. The third triangle is rendered in a separate draw call.    Text rendering supports basic depth testing, but this isn't enough to draw multiple semitransparent objects both behind and in front of text. The third triangle is rendered in a separate draw call.    Text rendering supports basic depth testing, but this isn't enough to draw multiple semitransparent objects both behind and in front of text. The third triangle is rendered in a separate draw call.    Text rendering supports basic depth testing, but this isn't enough to draw multiple semitransparent objects both behind and in front of text. The third triangle is rendered in a separate draw call.    ",
             Some((50.0, 50.0)),
@@ -133,11 +133,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             vertex: VertexState {
                 module: &triangle_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[VertexBufferLayout {
+                buffers: &[Some(VertexBufferLayout {
                     array_stride: std::mem::size_of::<TriangleVertex>() as BufferAddress,
                     step_mode: VertexStepMode::Vertex,
                     attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x4],
-                }],
+                })],
                 compilation_options: PipelineCompilationOptions::default(),
             },
             fragment: Some(FragmentState {
@@ -156,7 +156,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
             },
             depth_stencil: Some(triangle_depth_stencil_state),
             multisample: MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -222,8 +222,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    fn render(&mut self) -> Result<(), SurfaceError> {
-        let frame = self.surface.get_current_texture()?;
+    fn render(&mut self) {
+        let frame = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            other => panic!("Failed to get current surface texture: {other:?}"),
+        };
         let view = frame.texture.create_view(&TextureViewDescriptor::default());
 
         // Prepare text rendering
@@ -260,13 +263,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(&self.triangle_pipeline);
             render_pass.set_vertex_buffer(0, self.triangle_vertex_buffer.slice(..));
             render_pass.draw(0..6, 0..1);
 
-            self.render();
+            self.text.render(&mut render_pass);
 
             render_pass.set_pipeline(&self.triangle_pipeline);
             render_pass.set_vertex_buffer(0, self.triangle_vertex_buffer.slice(..));
@@ -275,9 +279,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        frame.present();
-
-        Ok(())
+        self.queue.present(frame);
     }
 
     fn window_event(&mut self, event: WindowEvent) {
@@ -288,12 +290,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
                 self.resize(physical_size);
             }
             WindowEvent::RedrawRequested => {
-                match self.render() {
-                    Ok(_) => {}
-                    Err(SurfaceError::Lost) => self.resize(self.window.inner_size()),
-                    Err(SurfaceError::OutOfMemory) => panic!("Out of memory"),
-                    Err(e) => eprintln!("Render error: {:?}", e),
-                }
+                self.render();
             }
             _ => {}
         }

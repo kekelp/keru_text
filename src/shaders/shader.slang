@@ -1,7 +1,7 @@
 import keru_text;
 
 struct VertexOutput {
-    GlyphQuad quad;
+    nointerpolation GlyphQuad quad;
     float4 position: SV_Position;
     float2 uv;
 }

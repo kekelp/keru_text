@@ -45,7 +45,7 @@ const REALISTIC_MODE_DESC: &'static str = "Press Ctrl+S to toggle between realis
 
 impl State {
     fn new(window: Arc<Window>) -> Self {
-        let instance = Instance::new(&InstanceDescriptor::default());
+        let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default())).unwrap();
         let device_desc = DeviceDescriptor {
             required_features: wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS,
@@ -354,7 +354,10 @@ impl winit::application::ApplicationHandler for Application {
                     state.first_prepare_time = Some(first_prepare_start.elapsed());
                 }
 
-                let surface_texture = state.surface.get_current_texture().unwrap();
+                let surface_texture = match state.surface.get_current_texture() {
+                    wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+                    other => panic!("Failed to get current surface texture: {other:?}"),
+                };
                 let mut encoder = state.device.create_command_encoder(&CommandEncoderDescriptor::default());
 
                 {
@@ -375,7 +378,7 @@ impl winit::application::ApplicationHandler for Application {
 
                 state.queue.submit(Some(encoder.finish()));
 
-                surface_texture.present();
+                state.queue.present(surface_texture);
 
                 let frame_end = Instant::now();
 

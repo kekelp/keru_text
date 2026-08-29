@@ -48,7 +48,7 @@ struct State {
 impl State {
     fn new(window: Arc<Window>) -> Self {
         let physical_size = window.inner_size();
-        let instance = Instance::new(&InstanceDescriptor::default());
+        let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
         let adapter =
             pollster::block_on(instance.request_adapter(&RequestAdapterOptions::default()))
                 .unwrap();
@@ -74,6 +74,7 @@ impl State {
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
 
         surface.configure(&device, &surface_config);
@@ -102,7 +103,10 @@ impl State {
         
         self.text.prepare_all();
 
-        let surface_texture = self.surface.get_current_texture().unwrap();
+        let surface_texture = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            other => panic!("Failed to get current surface texture: {other:?}"),
+        };
         let view = surface_texture
             .texture
             .create_view(&TextureViewDescriptor::default());
@@ -132,7 +136,7 @@ impl State {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        surface_texture.present();
+        self.queue.present(surface_texture);
     }
 
     fn resize(&mut self, new_size: LogicalSize<u32>) {

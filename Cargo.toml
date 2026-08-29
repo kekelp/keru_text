@@ -17,7 +17,7 @@ opt-level = 3
 
 [dependencies]
 parley = { git = "https://github.com/kekelp/parley" }
-wgpu = { version = "27", default-features = true, features = ["spirv"] }
+wgpu = { version = "30", default-features = true, features = ["spirv"] }
 etagere = "0.2.10"
 lru = { version = "0.12.1", default-features = false }
 rustc-hash = "2.0"
