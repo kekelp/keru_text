@@ -628,7 +628,7 @@ impl RenderData {
 
         let font = run.font();
         let font_size = run.font_size();
-        let font_key = font.font.data.id();
+        let font_key = font.data.id();
 
         // partial borrow humiliation ritual
         let mut scale_cx = self.scale_cx.take().unwrap();
@@ -644,14 +644,14 @@ impl RenderData {
                 }
             } else {
                 // Lazily initialize to skip the cost when all glyphs are cached.
-                let font_ref = FontRef::from_index(font.font.data.as_ref(), font.font.index as usize).unwrap();
+                let font_ref = FontRef::from_index(font.data.as_ref(), font.index as usize).unwrap();
                 if scaler.is_none() {
                     scaler = Some(
                         scale_cx
                             .builder(font_ref)
                             .size(font_size)
                             .hint(true)
-                            .normalized_coords(run.normalized_coords().iter().map(|c| c.to_bits()))
+                            .normalized_coords(run.normalized_coords())
                             .build()
                     );
                 }
