@@ -1458,7 +1458,8 @@ impl Text {
             },
         };
 
-        let focused_anchor_base = self.text_boxes[focused_key].selection.anchor_base();
+        // let focused_anchor_base = self.text_boxes[focused_key].selection.anchor_base();
+
         let mut current_key = focused_key;
         let mut did_extend = false;
 
@@ -1514,17 +1515,19 @@ impl Text {
                     local_pos.y + linked_box.scroll_offset.1,
                 );
 
-                match focused_anchor_base {
-                    parley::AnchorBase::Word(_, _) => {
-                        linked_box.selection.select_word_at_point(&linked_box.layout, anchor_point.0, anchor_point.1);
-                    }
-                    parley::AnchorBase::Line(_, _) => {
-                        linked_box.selection.select_line_at_point(&linked_box.layout, anchor_point.0, anchor_point.1);
-                    }
-                    _ => {
-                        linked_box.selection.move_to_point(&linked_box.layout, anchor_point.0, anchor_point.1);
-                    }
-                }
+                // Parley doesn't let us see the selection granularity, so we can't do anything to preserve it in this case.
+                // match focused_anchor_base {
+                //     parley::AnchorBase::Word(_, _) => {
+                //         linked_box.selection.select_word_at_point(&linked_box.layout, anchor_point.0, anchor_point.1);
+                //     }
+                //     parley::AnchorBase::Line(_, _) => {
+                //         linked_box.selection.select_line_at_point(&linked_box.layout, anchor_point.0, anchor_point.1);
+                //     }
+                //     _ => {
+                //         linked_box.selection.move_to_point(&linked_box.layout, anchor_point.0, anchor_point.1);
+                //     }
+                // }
+                linked_box.selection.move_to_point(&linked_box.layout, anchor_point.0, anchor_point.1);
                 linked_box.selection.extend_selection_to_point(&linked_box.layout, local_cursor.0, local_cursor.1);
                 break;
             }

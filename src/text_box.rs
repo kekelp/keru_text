@@ -140,6 +140,33 @@ pub(crate) fn original_default_style() -> TextStyle2 {
     }
 }
 
+// Helper to push a whole root style as individual properties.
+fn push_root_style(builder: &mut RangedBuilder<'_, ColorBrush>, style: &TextStyle2) {
+    builder.push_default(StyleProperty::FontFamily(style.font_family.clone()));
+    builder.push_default(StyleProperty::FontSize(style.font_size));
+    builder.push_default(StyleProperty::FontWidth(style.font_width));
+    builder.push_default(StyleProperty::FontStyle(style.font_style));
+    builder.push_default(StyleProperty::FontWeight(style.font_weight));
+    builder.push_default(StyleProperty::FontVariations(style.font_variations.clone()));
+    builder.push_default(StyleProperty::FontFeatures(style.font_features.clone()));
+    builder.push_default(StyleProperty::Locale(style.locale.clone()));
+    builder.push_default(StyleProperty::Brush(style.brush));
+    builder.push_default(StyleProperty::Underline(style.has_underline));
+    builder.push_default(StyleProperty::UnderlineOffset(style.underline_offset));
+    builder.push_default(StyleProperty::UnderlineSize(style.underline_size));
+    builder.push_default(StyleProperty::UnderlineBrush(style.underline_brush));
+    builder.push_default(StyleProperty::Strikethrough(style.has_strikethrough));
+    builder.push_default(StyleProperty::StrikethroughOffset(style.strikethrough_offset));
+    builder.push_default(StyleProperty::StrikethroughSize(style.strikethrough_size));
+    builder.push_default(StyleProperty::StrikethroughBrush(style.strikethrough_brush));
+    builder.push_default(StyleProperty::LineHeight(style.line_height));
+    builder.push_default(StyleProperty::WordSpacing(style.word_spacing));
+    builder.push_default(StyleProperty::LetterSpacing(style.letter_spacing));
+    builder.push_default(StyleProperty::WordBreak(style.word_break));
+    builder.push_default(StyleProperty::OverflowWrap(style.overflow_wrap));
+    builder.push_default(StyleProperty::TextWrapMode(style.text_wrap_mode));
+}
+
 impl TextBox {
     pub(crate) fn is_scroll_distance_above_tolerance(&self) -> bool {
         let distance_x = (self.scroll_offset.0 - self.render_data_info.base_scroll.0).abs();
@@ -1048,7 +1075,8 @@ impl TextBox {
         let layout_cx = &mut shared.layout_cx;
         let font_cx = &mut shared.font_cx;
 
-        let mut builder = layout_cx.ranged_builder(font_cx, &self.text, style, scale_factor as f32, true);
+        let mut builder = layout_cx.ranged_builder(font_cx, &self.text, scale_factor as f32, true);
+        push_root_style(&mut builder, style);
 
         for prop in &self.style_property_overrides {
             builder.push(prop.clone(), 0..usize::MAX);
@@ -1066,9 +1094,8 @@ impl TextBox {
         let max_advance = if self.single_line { None } else { Some(self.width) };
 
         layout.break_all_lines(max_advance);
-        
+
         layout.align(
-            max_advance,
             self.alignment,
             AlignmentOptions::default(),
         );
@@ -1095,7 +1122,6 @@ impl TextBox {
         self.layout.break_all_lines(max_advance);
 
         self.layout.align(
-            max_advance,
             self.alignment,
             AlignmentOptions::default(),
         );

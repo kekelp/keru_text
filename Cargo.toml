@@ -7,7 +7,7 @@ edition = "2024"
 default = ["fontconfig-dlopen"]
 panic_on_handle_drop = []
 accessibility = ["dep:accesskit", "parley/accesskit"]
-fontconfig-dlopen = ["parley/fontconfig-dlopen"]
+fontconfig-dlopen = ["fontique/fontconfig-dlopen"]
 
 [profile.dev]
 opt-level = 1
@@ -16,7 +16,10 @@ strip = "debuginfo"
 opt-level = 3
 
 [dependencies]
-parley = { git = "https://github.com/kekelp/parley" }
+parley = { git = "https://github.com/linebender/parley" }
+fontique = { git = "https://github.com/linebender/parley" }
+# parley = { git = "https://github.com/kekelp/parley" }
+# fontique = { git = "https://github.com/kekelp/parley" }
 wgpu = { version = "30", default-features = true, features = ["spirv"] }
 etagere = "0.2.10"
 lru = { version = "0.12.1", default-features = false }

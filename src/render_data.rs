@@ -589,10 +589,9 @@ impl RenderData {
 
         for line in text_box.layout.lines() {
             let metrics = line.metrics();
-            let line_y = metrics.baseline;
 
-            let line_top = line_y - metrics.ascent;
-            let line_bottom = line_y + metrics.descent;
+            let line_top = metrics.block_min_coord;
+            let line_bottom = metrics.block_max_coord;
 
             if line_bottom < clip_top - SCROLL_TOLERANCE || line_top > clip_bottom + SCROLL_TOLERANCE {
                 continue;
@@ -629,7 +628,7 @@ impl RenderData {
 
         let font = run.font();
         let font_size = run.font_size();
-        let font_key = font.data.id();
+        let font_key = font.font.data.id();
 
         // partial borrow humiliation ritual
         let mut scale_cx = self.scale_cx.take().unwrap();
@@ -645,14 +644,14 @@ impl RenderData {
                 }
             } else {
                 // Lazily initialize to skip the cost when all glyphs are cached.
-                let font_ref = FontRef::from_index(font.data.as_ref(), font.index as usize).unwrap();
+                let font_ref = FontRef::from_index(font.font.data.as_ref(), font.font.index as usize).unwrap();
                 if scaler.is_none() {
                     scaler = Some(
                         scale_cx
                             .builder(font_ref)
                             .size(font_size)
                             .hint(true)
-                            .normalized_coords(run.normalized_coords())
+                            .normalized_coords(run.normalized_coords().iter().map(|c| c.to_bits()))
                             .build()
                     );
                 }
